@@ -27,4 +27,15 @@ Enforced by code-reviewer. knowledge-curator promotes patterns here once they've
 ## Git
 - Branch from `main`; PR per feature slug; commits imperative English; never merge without human approval.
 
+## UI visual patterns (promoted from the working prototype, 2026-07-12)
+
+Source: `docs/ECM Planning Prototype.dc.html` (ADR-0006). Full token table and screen
+inventory live in the `/cmplus-ui` skill — this entry is the pointer/reminder.
+- Navy `#0F2542` / gold `#C9A227` theme, IBM Plex Sans Thai + Bai Jamjuree fonts — not the
+  orange-brown/Inter combination described in `docs/3.` (superseded).
+- Reusable pieces: StatTile, StatusPill, DataTable (header `#F7F8FA`), progress-bar table
+  cell, Gantt bar layering (critical/non-critical/baseline/data-date line), bottom-right toast.
+- 13-screen nav is canonical; see `.claude/knowledge/domain/modules-map.md` for the two
+  open reconciliation questions against the 15-module doc list.
+
 <!-- knowledge-curator: append promoted patterns below -->

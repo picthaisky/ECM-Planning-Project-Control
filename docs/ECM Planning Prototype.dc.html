@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&amp;family=Bai+Jamjuree:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#F4F5F7;font-family:'IBM Plex Sans Thai',system-ui,sans-serif}
+a{color:#0F2542}a:hover{color:#C9A227}
+</style>
+</helmet>
+
+<div style="display:flex;height:100vh;min-height:720px;background:#F4F5F7;overflow:hidden" data-screen-label="ECM App">
+  <!-- ===== Sidebar ===== -->
+  <div style="width:222px;flex:none;background:#0F2542;color:#fff;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:10px;padding:18px 16px 16px;border-bottom:1px solid rgba(255,255,255,.08)">
+      <div style="width:34px;height:34px;background:#C9A227;border-radius:6px;display:grid;place-items:center;font:700 12px 'Bai Jamjuree',sans-serif;color:#0F2542">ECM</div>
+      <div>
+        <div style="font:700 13px 'Bai Jamjuree',sans-serif;letter-spacing:.4px">ECM-PLANNING</div>
+        <div style="font-size:10px;color:rgba(255,255,255,.45)">Project Control</div>
+      </div>
+    </div>
+    <div style="padding:14px 10px;display:flex;flex-direction:column;gap:2px;font-size:13px">
+      <sc-for list="{{ navRows }}" as="nav" hint-placeholder-count="9">
+        <div onClick="{{ nav.go }}" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:7px;cursor:pointer;background:{{ nav.bg }};color:{{ nav.fg }};font-weight:{{ nav.fw }}" style-hover="background:{{ nav.hoverBg }}">
+          <span style="width:8px;height:8px;flex:none;border-radius:2px;background:{{ nav.dotBg }};border:{{ nav.dotBorder }}"></span>{{ nav.label }}
+        </div>
+      </sc-for>
+    </div>
+    <div style="margin-top:auto;padding:14px 18px;border-top:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px">
+      <div style="width:30px;height:30px;border-radius:50%;background:#33507A;display:grid;place-items:center;font-size:12px;font-weight:600">สม</div>
+      <div style="font-size:11.5px;line-height:1.3"><div style="font-weight:600">สมชาย ว.</div><div style="color:rgba(255,255,255,.45)">Project Director</div></div>
+    </div>
+  </div>
+
+  <!-- ===== Main ===== -->
+  <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+    <div style="display:flex;align-items:center;gap:14px;padding:13px 22px;background:#fff;border-bottom:1px solid #E3E5EA;flex:none">
+      <div>
+        <div style="font:600 16px 'Bai Jamjuree',sans-serif;color:#0F2542">{{ pageTitle }}</div>
+        <div style="font-size:11.5px;color:#8A8F99">อาคารสำนักงานใหญ่ 12 ชั้น — เขตสาทร · PRJ-2026-014 · Data date 11 ก.ค. 2569</div>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#5A6472">สัปดาห์ 58 / 104</div>
+        <div onClick="{{ doCalc }}" style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#0F2542;font-weight:600;cursor:pointer" style-hover="border-color:#0F2542">⟳ คำนวณ</div>
+        <div style="width:1px;height:20px;background:#E3E5EA"></div>
+        <div onClick="{{ doExcel }}" style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1F7A4D;font-weight:600;cursor:pointer" style-hover="border-color:#1F7A4D">Excel</div>
+        <div onClick="{{ doMpp }}" style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#33507A;font-weight:600;cursor:pointer" style-hover="border-color:#33507A">MS Project</div>
+        <div onClick="{{ doXer }}" style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#B23A3A;font-weight:600;cursor:pointer" style-hover="border-color:#B23A3A">P6 (.XER)</div>
+        <div onClick="{{ doPdf }}" style="font-size:11.5px;padding:5px 12px;background:#0F2542;color:#fff;border-radius:6px;font-weight:500;cursor:pointer" style-hover="background:#1B3A63">Export PDF</div>
+      </div>
+    </div>
+
+    <div style="flex:1;overflow:auto;padding:18px 22px">
+
+      <!-- ================= DASHBOARD ================= -->
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Executive Dashboard" style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px">
+          <div onClick="{{ goWbs }}" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px;cursor:pointer" style-hover="border-color:#C9A227">
+            <div style="font-size:11px;color:#8A8F99">ความก้าวหน้า (Actual)</div>
+            <div style="font:700 24px 'Bai Jamjuree',sans-serif;color:#0F2542">54.2%</div>
+            <div style="font-size:10.5px;color:#B23A3A">แผน 58.8% · ช้า −4.6%</div>
+          </div>
+          <div onClick="{{ goEvm }}" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px;cursor:pointer" style-hover="border-color:#C9A227">
+            <div style="font-size:11px;color:#8A8F99">SPI</div>
+            <div style="font:700 24px 'Bai Jamjuree',sans-serif;color:#B23A3A">0.92</div>
+            <div style="font-size:10.5px;color:#8A8F99">Schedule Performance</div>
+          </div>
+          <div onClick="{{ goEvm }}" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px;cursor:pointer" style-hover="border-color:#C9A227">
+            <div style="font-size:11px;color:#8A8F99">CPI</div>
+            <div style="font:700 24px 'Bai Jamjuree',sans-serif;color:#1F7A4D">1.04</div>
+            <div style="font-size:10.5px;color:#8A8F99">Cost Performance</div>
+          </div>
+          <div onClick="{{ goEvm }}" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px;cursor:pointer" style-hover="border-color:#C9A227">
+            <div style="font-size:11px;color:#8A8F99">EAC</div>
+            <div style="font:700 24px 'Bai Jamjuree',sans-serif;color:#0F2542">466 MB</div>
+            <div style="font-size:10.5px;color:#1F7A4D">VAC +19 MB (ต่ำกว่างบ)</div>
+          </div>
+          <div onClick="{{ goPayment }}" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px;cursor:pointer" style-hover="border-color:#C9A227">
+            <div style="font-size:11px;color:#8A8F99">เบิกจ่ายสะสม</div>
+            <div style="font:700 24px 'Bai Jamjuree',sans-serif;color:#0F2542">238 MB</div>
+            <div style="font-size:10.5px;color:#8A8F99">งวดที่ 14 / 24</div>
+          </div>
+          <div onClick="{{ goWeather }}" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px;cursor:pointer" style-hover="border-color:#C9A227">
+            <div style="font-size:11px;color:#8A8F99">วันฝนตกสะสม</div>
+            <div style="font:700 24px 'Bai Jamjuree',sans-serif;color:#0F2542">31 วัน</div>
+            <div style="font-size:10.5px;color:#C9A227">ขอขยายสัญญา 12 วัน</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:14px 16px">
+            <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
+              <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">EVM S-Curve</div>
+              <div style="display:flex;gap:14px;font-size:10.5px;color:#8A8F99;margin-left:auto">
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#8A8F99;display:inline-block"></span>PV แผน</span>
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#C9A227;display:inline-block"></span>EV ผลงาน</span>
+                <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#B23A3A;display:inline-block"></span>AC ต้นทุน</span>
+              </div>
+            </div>
+            <svg viewBox="0 0 560 190" style="width:100%;display:block">
+              <line x1="40" y1="10" x2="40" y2="160" stroke="#E3E5EA"></line>
+              <line x1="40" y1="160" x2="550" y2="160" stroke="#E3E5EA"></line>
+              <line x1="40" y1="110" x2="550" y2="110" stroke="#F0F1F4"></line>
+              <line x1="40" y1="60" x2="550" y2="60" stroke="#F0F1F4"></line>
+              <text x="34" y="164" font-size="9" fill="#8A8F99" text-anchor="end">0</text>
+              <text x="34" y="113" font-size="9" fill="#8A8F99" text-anchor="end">250</text>
+              <text x="34" y="63" font-size="9" fill="#8A8F99" text-anchor="end">500 MB</text>
+              <path d="M40 160 C 160 155, 240 120, 320 75 C 380 42, 480 22, 550 18" fill="none" stroke="#8A8F99" stroke-width="1.5" stroke-dasharray="5 4"></path>
+              <path d="M40 160 C 140 156, 220 132, 300 96" fill="none" stroke="#C9A227" stroke-width="2.5"></path>
+              <path d="M40 160 C 140 157, 220 136, 300 102" fill="none" stroke="#B23A3A" stroke-width="1.5"></path>
+              <line x1="300" y1="15" x2="300" y2="160" stroke="#0F2542" stroke-width="1" stroke-dasharray="3 3"></line>
+              <text x="306" y="24" font-size="9.5" fill="#0F2542" font-weight="600">Data Date</text>
+              <circle cx="300" cy="96" r="3.5" fill="#C9A227"></circle>
+            </svg>
+            <div onClick="{{ goEvm }}" style="font-size:11px;color:#0F2542;font-weight:600;cursor:pointer;margin-top:4px" style-hover="color:#C9A227">ดูรายละเอียด EVM →</div>
+          </div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:14px 16px;display:flex;flex-direction:column">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;margin-bottom:10px">Critical Path — งานวิกฤตใกล้ถึงกำหนด</div>
+            <div style="display:flex;flex-direction:column;gap:9px;font-size:11.5px">
+              <sc-for list="{{ criticalTop }}" as="c" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center">
+                  <div><div style="color:#1A2433;font-weight:500">{{ c.name }}</div><div style="color:#8A8F99;font-size:10.5px">{{ c.meta }}</div></div>
+                  <div style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ c.badgeBg }};color:{{ c.badgeFg }}">{{ c.badge }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div onClick="{{ goGantt }}" style="margin-top:auto;font-size:11px;color:#0F2542;font-weight:600;cursor:pointer;padding-top:10px" style-hover="color:#C9A227">ดู Gantt Chart ทั้งหมด →</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:16px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+            <div style="display:flex;align-items:baseline;padding:12px 16px 8px">
+              <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">ความก้าวหน้าตาม WBS (ถ่วงน้ำหนัก)</div>
+              <div onClick="{{ goWbs }}" style="margin-left:auto;font-size:11px;color:#0F2542;font-weight:600;cursor:pointer" style-hover="color:#C9A227">เปิด WBS →</div>
+            </div>
+            <div style="display:grid;grid-template-columns:44px 1fr 90px 150px 64px;gap:0;font-size:11.5px">
+              <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">WBS</div>
+              <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">หมวดงาน</div>
+              <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">Weight</div>
+              <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">แผน / จริง</div>
+              <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">Δ</div>
+              <sc-for list="{{ wbsSummary }}" as="w" hint-placeholder-count="4">
+                <div style="padding:8px 0 8px 16px;border-top:1px solid #F0F1F4;color:#8A8F99">{{ w.code }}</div>
+                <div style="padding:8px;border-top:1px solid #F0F1F4;color:#1A2433">{{ w.name }}</div>
+                <div style="padding:8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472">{{ w.weight }}</div>
+                <div style="padding:8px;border-top:1px solid #F0F1F4"><div style="height:8px;background:#EDEEF2;border-radius:4px;position:relative"><div style="position:absolute;inset:0;border-radius:4px;background:#D8DCE4;width:{{ w.planW }}"></div><div style="position:absolute;inset:0;border-radius:4px;background:#0F2542;width:{{ w.actW }}"></div></div></div>
+                <div style="padding:8px 16px 8px 8px;border-top:1px solid #F0F1F4;text-align:right;font-weight:600;color:{{ w.dColor }}">{{ w.delta }}</div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:14px 16px">
+            <div style="display:flex;align-items:baseline;margin-bottom:10px">
+              <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">Photo Progress ล่าสุด</div>
+              <div style="margin-left:auto;font-size:10.5px;color:#8A8F99">วันนี้ 09:40</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div style="aspect-ratio:4/3;border-radius:6px;background:repeating-linear-gradient(45deg,#E7EAEF 0 8px,#EFF1F5 8px 16px);display:grid;place-items:center;font:10px ui-monospace,monospace;color:#8A8F99">photo: ชั้น 9 โซน B</div>
+              <div style="aspect-ratio:4/3;border-radius:6px;background:repeating-linear-gradient(45deg,#E7EAEF 0 8px,#EFF1F5 8px 16px);display:grid;place-items:center;font:10px ui-monospace,monospace;color:#8A8F99">photo: curtain wall</div>
+              <div style="aspect-ratio:4/3;border-radius:6px;background:repeating-linear-gradient(45deg,#E7EAEF 0 8px,#EFF1F5 8px 16px);display:grid;place-items:center;font:10px ui-monospace,monospace;color:#8A8F99">photo: MEP ชั้น 3</div>
+              <div onClick="{{ goPhoto }}" style="aspect-ratio:4/3;border-radius:6px;background:#0F2542;display:grid;place-items:center;font-size:11.5px;color:#fff;font-weight:500;cursor:pointer" style-hover="background:#1B3A63">+ 24 รูป</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= WBS ================= -->
+      <sc-if value="{{ isWbs }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="WBS &amp; Activity" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+        <div style="display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #F0F1F4">
+          <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">Work Breakdown Structure — คลิกแถวเพื่อขยาย/ย่อ</div>
+          <div style="margin-left:auto;display:flex;gap:8px">
+            <div onClick="{{ expandAll }}" style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#5A6472;cursor:pointer" style-hover="border-color:#0F2542;color:#0F2542">ขยายทั้งหมด</div>
+            <div onClick="{{ collapseAll }}" style="font-size:11.5px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#5A6472;cursor:pointer" style-hover="border-color:#0F2542;color:#0F2542">ย่อทั้งหมด</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:90px 1fr 90px 90px 170px 90px;font-size:11.5px">
+          <div style="padding:8px 0 8px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">WBS Code</div>
+          <div style="padding:8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">ชื่องาน / กิจกรรม</div>
+          <div style="padding:8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">Weight</div>
+          <div style="padding:8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">Duration</div>
+          <div style="padding:8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">% ความคืบหน้า</div>
+          <div style="padding:8px 16px 8px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">สถานะ</div>
+          <sc-for list="{{ wbsRows }}" as="r" hint-placeholder-count="8">
+            <div onClick="{{ r.toggle }}" style="padding:9px 0 9px 16px;border-top:1px solid #F0F1F4;color:#8A8F99;cursor:pointer;background:{{ r.rowBg }}">{{ r.code }}</div>
+            <div onClick="{{ r.toggle }}" style="padding:9px 8px 9px {{ r.indent }};border-top:1px solid #F0F1F4;cursor:pointer;background:{{ r.rowBg }};color:#1A2433;font-weight:{{ r.fw }};display:flex;align-items:center;gap:7px"><span style="color:#8A8F99;font-size:9px;width:10px;display:inline-block">{{ r.caret }}</span>{{ r.name }}</div>
+            <div onClick="{{ r.toggle }}" style="padding:9px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;cursor:pointer;background:{{ r.rowBg }}">{{ r.weight }}</div>
+            <div onClick="{{ r.toggle }}" style="padding:9px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;cursor:pointer;background:{{ r.rowBg }}">{{ r.dur }}</div>
+            <div onClick="{{ r.toggle }}" style="padding:9px 8px;border-top:1px solid #F0F1F4;cursor:pointer;background:{{ r.rowBg }};display:flex;align-items:center;gap:8px"><div style="flex:1;height:8px;background:#EDEEF2;border-radius:4px;position:relative"><div style="position:absolute;inset:0;border-radius:4px;background:#0F2542;width:{{ r.progW }}"></div></div><span style="color:#5A6472;width:38px;text-align:right">{{ r.prog }}</span></div>
+            <div onClick="{{ r.toggle }}" style="padding:9px 16px 9px 8px;border-top:1px solid #F0F1F4;text-align:right;cursor:pointer;background:{{ r.rowBg }}"><span style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ r.stBg }};color:{{ r.stFg }}">{{ r.status }}</span></div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= GANTT ================= -->
+      <sc-if value="{{ isGantt }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Gantt / CPM" style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid #F0F1F4">
+          <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">Gantt Chart — CPM Schedule</div>
+          <div style="display:flex;gap:14px;font-size:10.5px;color:#8A8F99;margin-left:14px">
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:8px;background:#B23A3A;border-radius:2px;display:inline-block"></span>Critical (TF=0)</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:8px;background:#33507A;border-radius:2px;display:inline-block"></span>Non-critical</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:4px;background:#C9A227;border-radius:2px;display:inline-block"></span>Baseline</span>
+          </div>
+          <div onClick="{{ toggleCritical }}" style="margin-left:auto;font-size:11.5px;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid {{ critBtnBorder }};background:{{ critBtnBg }};color:{{ critBtnFg }};font-weight:600">{{ critBtnLabel }}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:250px 1fr;font-size:11.5px">
+          <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;border-right:1px solid #F0F1F4">กิจกรรม</div>
+          <div style="background:#F7F8FA;display:grid;grid-template-columns:repeat(12,1fr);color:#8A8F99;font-size:9.5px">
+            <div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">ม.ค.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">ก.พ.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">มี.ค.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">เม.ย.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">พ.ค.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">มิ.ย.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2;background:#FBF4DE">ก.ค.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">ส.ค.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">ก.ย.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">ต.ค.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">พ.ย.</div><div style="padding:7px 0;text-align:center;border-left:1px solid #EDEEF2">ธ.ค.</div>
+          </div>
+          <sc-for list="{{ ganttRows }}" as="g" hint-placeholder-count="8">
+            <div style="padding:0 0 0 16px;border-top:1px solid #F0F1F4;border-right:1px solid #F0F1F4;display:flex;flex-direction:column;justify-content:center;min-height:44px">
+              <div style="color:#1A2433;font-weight:500">{{ g.name }}</div>
+              <div style="color:#8A8F99;font-size:10px">{{ g.meta }}</div>
+            </div>
+            <div style="border-top:1px solid #F0F1F4;position:relative;background:linear-gradient(90deg,transparent calc(54.2% - 1px),rgba(201,162,39,.55) calc(54.2% - 1px),rgba(201,162,39,.55) 54.2%,transparent 54.2%)">
+              <div style="position:absolute;top:8px;height:13px;border-radius:3px;background:{{ g.barBg }};left:{{ g.left }};width:{{ g.width }}"><div style="position:absolute;inset:0;border-radius:3px;background:rgba(255,255,255,.35);width:{{ g.progW }}"></div></div>
+              <div style="position:absolute;top:26px;height:4px;border-radius:2px;background:#C9A227;opacity:.8;left:{{ g.blLeft }};width:{{ g.blWidth }}"></div>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:10px 16px;border-top:1px solid #F0F1F4;font-size:10.5px;color:#8A8F99">เส้นทองแนวตั้ง = Data date (11 ก.ค. 2569) · แถบขาวโปร่งบนบาร์ = % ความคืบหน้าจริง</div>
+      </div>
+      </sc-if>
+
+      <!-- ================= EVM ================= -->
+      <sc-if value="{{ isEvm }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="EVM S-Curve" style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:16px 18px">
+          <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px">
+            <div style="font:600 14px 'Bai Jamjuree',sans-serif;color:#0F2542">EVM S-Curve · PV / EV / AC + EAC Forecast</div>
+            <div style="display:flex;gap:14px;font-size:10.5px;color:#8A8F99;margin-left:auto">
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#8A8F99;display:inline-block"></span>PV</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:3px;background:#C9A227;display:inline-block"></span>EV</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#B23A3A;display:inline-block"></span>AC</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:14px;height:2px;background:#33507A;display:inline-block;border-top:2px dotted #33507A"></span>EAC Forecast</span>
+            </div>
+          </div>
+          <svg viewBox="0 0 720 260" style="width:100%;display:block">
+            <line x1="46" y1="10" x2="46" y2="225" stroke="#E3E5EA"></line>
+            <line x1="46" y1="225" x2="710" y2="225" stroke="#E3E5EA"></line>
+            <line x1="46" y1="155" x2="710" y2="155" stroke="#F0F1F4"></line>
+            <line x1="46" y1="85" x2="710" y2="85" stroke="#F0F1F4"></line>
+            <line x1="46" y1="30" x2="710" y2="30" stroke="#F0F1F4" stroke-dasharray="3 3"></line>
+            <text x="40" y="229" font-size="10" fill="#8A8F99" text-anchor="end">0</text>
+            <text x="40" y="159" font-size="10" fill="#8A8F99" text-anchor="end">160</text>
+            <text x="40" y="89" font-size="10" fill="#8A8F99" text-anchor="end">320</text>
+            <text x="40" y="34" font-size="10" fill="#8A8F99" text-anchor="end">BAC 485</text>
+            <path d="M46 225 C 190 218, 300 165, 400 105 C 480 60, 620 36, 710 30" fill="none" stroke="#8A8F99" stroke-width="2" stroke-dasharray="6 5"></path>
+            <path d="M46 225 C 180 219, 280 182, 384 130" fill="none" stroke="#C9A227" stroke-width="3"></path>
+            <path d="M46 225 C 180 220, 280 188, 384 140" fill="none" stroke="#B23A3A" stroke-width="2"></path>
+            <path d="M384 130 C 470 88, 620 50, 710 42" fill="none" stroke="#33507A" stroke-width="2" stroke-dasharray="2 4"></path>
+            <line x1="384" y1="14" x2="384" y2="225" stroke="#0F2542" stroke-width="1" stroke-dasharray="3 3"></line>
+            <text x="390" y="24" font-size="10.5" fill="#0F2542" font-weight="600">Data Date · สัปดาห์ 58</text>
+            <circle cx="384" cy="130" r="4" fill="#C9A227"></circle>
+            <text x="392" y="128" font-size="10.5" fill="#1A2433">EV 263 MB</text>
+            <circle cx="384" cy="140" r="3" fill="#B23A3A"></circle>
+            <text x="392" y="152" font-size="10.5" fill="#B23A3A">AC 253 MB</text>
+            <text x="660" y="56" font-size="10.5" fill="#33507A" font-weight="600">EAC 466</text>
+          </svg>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px">
+          <sc-for list="{{ evmMetrics }}" as="m" hint-placeholder-count="12">
+            <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px">
+              <div style="font-size:11px;color:#8A8F99">{{ m.label }}</div>
+              <div style="font:700 21px 'Bai Jamjuree',sans-serif;color:{{ m.color }}">{{ m.value }}</div>
+              <div style="font-size:10px;color:#8A8F99">{{ m.sub }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= CASH FLOW ================= -->
+      <sc-if value="{{ isCash }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Cash Flow" style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:16px 18px">
+          <div style="font:600 14px 'Bai Jamjuree',sans-serif;color:#0F2542;margin-bottom:14px">กระแสเงินสดรายงวด (Cash Flow) — รับจริง vs พยากรณ์</div>
+          <div style="display:flex;align-items:flex-end;gap:10px;height:150px">
+            <sc-for list="{{ cashBars }}" as="b" hint-placeholder-count="10">
+              <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;height:100%;justify-content:flex-end">
+                <div style="font-size:9.5px;color:#8A8F99">{{ b.value }}</div>
+                <div style="width:100%;border-radius:3px 3px 0 0;background:{{ b.bg }};border:{{ b.border }};height:{{ b.h }}"></div>
+                <div style="font-size:9.5px;color:#8A8F99">{{ b.label }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+          <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;padding:12px 16px 8px">สรุปการเงินสะสม</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;font-size:12px">
+            <div style="padding:12px 16px;border-top:1px solid #F0F1F4"><div style="color:#8A8F99;font-size:11px">รับเงินสะสม</div><div style="font:700 20px 'Bai Jamjuree',sans-serif;color:#0F2542">238.4 MB</div></div>
+            <div style="padding:12px 16px;border-top:1px solid #F0F1F4;border-left:1px solid #F0F1F4"><div style="color:#8A8F99;font-size:11px">จ่ายจริงสะสม (AC)</div><div style="font:700 20px 'Bai Jamjuree',sans-serif;color:#B23A3A">253.1 MB</div></div>
+            <div style="padding:12px 16px;border-top:1px solid #F0F1F4;border-left:1px solid #F0F1F4"><div style="color:#8A8F99;font-size:11px">Retention สะสม (5%)</div><div style="font:700 20px 'Bai Jamjuree',sans-serif;color:#0F2542">11.9 MB</div></div>
+            <div style="padding:12px 16px;border-top:1px solid #F0F1F4;border-left:1px solid #F0F1F4"><div style="color:#8A8F99;font-size:11px">Net Cash Position</div><div style="font:700 20px 'Bai Jamjuree',sans-serif;color:#B23A3A">−14.7 MB</div></div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= PAYMENT ================= -->
+      <sc-if value="{{ isPayment }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Payment Certificate" style="display:grid;grid-template-columns:1.5fr 1fr;gap:16px;align-items:start">
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+          <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;padding:12px 16px">งวดงาน — คลิกเพื่อดู Certificate</div>
+          <div style="display:flex;gap:8px;padding:0 16px 10px;font-size:11px">
+            <div style="padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#5A6472;cursor:pointer" style-hover="border-color:#0F2542;color:#0F2542">⚙ ตั้งค่า Retention 5% / Advance 10%</div>
+            <div style="padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#5A6472;cursor:pointer" style-hover="border-color:#0F2542;color:#0F2542">± ผูก Variation Order</div>
+          </div>
+          <div style="display:grid;grid-template-columns:48px 1fr 84px 64px 64px 64px 104px;font-size:11.5px">
+            <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">งวด</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">รายละเอียด</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">มูลค่า (MB)</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">ทำจริง%</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">ยื่นเบิก%</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">อนุมัติ%</div>
+            <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">สถานะ</div>
+            <sc-for list="{{ payRows }}" as="p" hint-placeholder-count="6">
+              <div onClick="{{ p.view }}" style="padding:10px 0 10px 16px;border-top:1px solid #F0F1F4;color:#8A8F99;cursor:pointer;background:{{ p.rowBg }}">{{ p.no }}</div>
+              <div onClick="{{ p.view }}" style="padding:10px 8px;border-top:1px solid #F0F1F4;color:#1A2433;cursor:pointer;background:{{ p.rowBg }}">{{ p.desc }}</div>
+              <div onClick="{{ p.view }}" style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;cursor:pointer;background:{{ p.rowBg }}">{{ p.value }}</div>
+              <div onClick="{{ p.view }}" style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;cursor:pointer;background:{{ p.rowBg }}">{{ p.actual }}</div>
+              <div onClick="{{ p.view }}" style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;cursor:pointer;background:{{ p.rowBg }}">{{ p.claim }}</div>
+              <div onClick="{{ p.view }}" style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;cursor:pointer;background:{{ p.rowBg }}">{{ p.approve }}</div>
+              <div onClick="{{ p.view }}" style="padding:10px 16px 10px 8px;border-top:1px solid #F0F1F4;text-align:right;cursor:pointer;background:{{ p.rowBg }}"><span style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ p.stBg }};color:{{ p.stFg }}">{{ p.status }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:18px 20px;position:sticky;top:0">
+          <div style="display:flex;align-items:center;gap:10px;padding-bottom:12px;border-bottom:2px solid #0F2542">
+            <div style="width:30px;height:30px;background:#C9A227;border-radius:6px;display:grid;place-items:center;font:700 10px 'Bai Jamjuree',sans-serif;color:#0F2542">ECM</div>
+            <div style="font:600 14px 'Bai Jamjuree',sans-serif;color:#0F2542">Payment Certificate — งวดที่ {{ payNo }}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0;font-size:12.5px;margin-top:8px">
+            <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F0F1F4"><span style="color:#8A8F99">รายละเอียดงวด</span><span style="color:#1A2433;font-weight:500;text-align:right;max-width:60%">{{ payDesc }}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F0F1F4"><span style="color:#8A8F99">มูลค่างวดงาน (Milestone Value)</span><span style="color:#1A2433;font-weight:600">{{ payValue }} MB</span></div>
+            <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F0F1F4"><span style="color:#8A8F99">% ความคืบหน้าตรวจรับ</span><span style="color:#1A2433;font-weight:600">{{ payProg }}</span></div>
+            <div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #F0F1F4"><span style="color:#8A8F99">หัก Retention 5%</span><span style="color:#B23A3A;font-weight:600">−{{ payRet }} MB</span></div>
+            <div style="display:flex;justify-content:space-between;padding:11px 0"><span style="color:#0F2542;font-weight:600">รับสุทธิ (Net Payment)</span><span style="font:700 18px 'Bai Jamjuree',sans-serif;color:#0F2542">{{ payNet }} MB</span></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <div style="flex:1;text-align:center;font-size:11.5px;padding:8px 0;background:#0F2542;color:#fff;border-radius:6px;font-weight:500;cursor:pointer" style-hover="background:#1B3A63">พิมพ์ Certificate</div>
+            <div style="flex:1;text-align:center;font-size:11.5px;padding:8px 0;border:1px solid #E3E5EA;border-radius:6px;color:#5A6472;cursor:pointer" style-hover="border-color:#0F2542;color:#0F2542">ส่งอนุมัติ</div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= PHOTO ================= -->
+      <sc-if value="{{ isPhoto }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Photo Progress">
+        <div style="display:flex;gap:8px;margin-bottom:14px;align-items:center">
+          <sc-for list="{{ zoneChips }}" as="z" hint-placeholder-count="4">
+            <div onClick="{{ z.pick }}" style="font-size:11.5px;padding:6px 14px;border-radius:20px;cursor:pointer;font-weight:600;background:{{ z.bg }};color:{{ z.fg }};border:1px solid {{ z.border }}">{{ z.label }}</div>
+          </sc-for>
+          <div style="margin-left:auto;font-size:11.5px;padding:6px 14px;background:#C9A227;color:#0F2542;border-radius:6px;font-weight:600;cursor:pointer" style-hover="background:#D9B440">+ อัปโหลดรูป</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <sc-for list="{{ photoRows }}" as="ph" hint-placeholder-count="8">
+            <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+              <div style="aspect-ratio:4/3;background:repeating-linear-gradient(45deg,#E7EAEF 0 8px,#EFF1F5 8px 16px);display:grid;place-items:center;font:10px ui-monospace,monospace;color:#8A8F99">{{ ph.slot }}</div>
+              <div style="padding:10px 12px">
+                <div style="font-size:12px;font-weight:600;color:#1A2433">{{ ph.title }}</div>
+                <div style="font-size:10.5px;color:#8A8F99;margin-top:2px">{{ ph.meta }}</div>
+                <div style="margin-top:6px;font-size:10.5px;color:#0F2542;font-weight:600">ผูกกับ {{ ph.act }} · {{ ph.prog }}</div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= VO ================= -->
+      <sc-if value="{{ isVo }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Variation Order" style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">อนุมัติแล้ว</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#1F7A4D">{{ voApprovedSum }}</div><div style="font-size:10.5px;color:#8A8F99">{{ voApprovedCount }} รายการ</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">รออนุมัติ</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#9A7B1B">{{ voPendingSum }}</div><div style="font-size:10.5px;color:#8A8F99">{{ voPendingCount }} รายการ</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">BAC ปรับปรุง (รวม VO อนุมัติ)</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#0F2542">{{ voBac }}</div><div style="font-size:10.5px;color:#8A8F99">จากงบตั้งต้น 485.0 MB</div></div>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+          <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;padding:12px 16px">รายการ Variation Order — กดอนุมัติ/ตีกลับได้</div>
+          <div style="display:grid;grid-template-columns:86px 1fr 80px 100px 110px 170px;font-size:11.5px">
+            <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">เลขที่</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">รายการ</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">ประเภท</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">มูลค่า (MB)</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">สถานะ</div>
+            <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">การดำเนินการ</div>
+            <sc-for list="{{ voRows }}" as="v" hint-placeholder-count="5">
+              <div style="padding:10px 0 10px 16px;border-top:1px solid #F0F1F4;color:#8A8F99">{{ v.no }}</div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4;color:#1A2433">{{ v.title }}</div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4"><span style="padding:2px 8px;border-radius:4px;font-size:10.5px;font-weight:600;background:{{ v.typeBg }};color:{{ v.typeFg }}">{{ v.type }}</span></div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#1A2433;font-weight:600">{{ v.amount }}</div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right"><span style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ v.stBg }};color:{{ v.stFg }}">{{ v.status }}</span></div>
+              <div style="padding:8px 16px 8px 8px;border-top:1px solid #F0F1F4;display:flex;gap:6px;justify-content:flex-end;align-items:center">
+                <sc-if value="{{ v.pending }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ v.approve }}" style="font-size:11px;padding:5px 12px;background:#1F7A4D;color:#fff;border-radius:6px;font-weight:600;cursor:pointer" style-hover="background:#25935D">อนุมัติ</div>
+                  <div onClick="{{ v.reject }}" style="font-size:11px;padding:5px 12px;border:1px solid #E3E5EA;color:#B23A3A;border-radius:6px;font-weight:600;cursor:pointer" style-hover="border-color:#B23A3A">ตีกลับ</div>
+                </sc-if>
+                <sc-if value="{{ v.done }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-size:10.5px;color:#8A8F99">{{ v.doneNote }}</span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= WEATHER ================= -->
+      <sc-if value="{{ isWeather }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Weather Log" style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">วันฝนตกสะสม</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#0F2542">{{ rainDays }} วัน</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">วันหยุดงานจากฝน</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#B23A3A">{{ stopDays }} วัน</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">สิทธิ์ขยายสัญญา (EOT)</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#C9A227">12 วัน</div></div>
+          <div style="background:#FBEBEB;border:1px solid #F0D5D5;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#B23A3A;font-weight:600">พยากรณ์พรุ่งนี้</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#B23A3A">ฝนหนัก 80%</div><div style="font-size:10.5px;color:#7A2A2A">แนะนำเลื่อนเทคอนกรีตโซน A</div></div>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+          <div style="display:flex;align-items:center;padding:12px 16px">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">บันทึกสภาพอากาศรายวัน (หลักฐานอ้างอิง EOT)</div>
+            <div onClick="{{ addWeather }}" style="margin-left:auto;font-size:11.5px;padding:6px 14px;background:#0F2542;color:#fff;border-radius:6px;font-weight:600;cursor:pointer" style-hover="background:#1B3A63">+ บันทึกวันนี้</div>
+          </div>
+          <div style="display:grid;grid-template-columns:110px 110px 110px 1fr 120px;font-size:11.5px">
+            <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">วันที่</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">สภาพอากาศ</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">ปริมาณฝน (mm)</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">ผลกระทบ</div>
+            <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">หยุดงาน</div>
+            <sc-for list="{{ weatherRows }}" as="w" hint-placeholder-count="7">
+              <div style="padding:9px 0 9px 16px;border-top:1px solid #F0F1F4;color:#1A2433">{{ w.date }}</div>
+              <div style="padding:9px 8px;border-top:1px solid #F0F1F4;color:#5A6472">{{ w.cond }}</div>
+              <div style="padding:9px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472">{{ w.mm }}</div>
+              <div style="padding:9px 8px;border-top:1px solid #F0F1F4;color:#5A6472">{{ w.impact }}</div>
+              <div style="padding:9px 16px 9px 8px;border-top:1px solid #F0F1F4;text-align:right"><span style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ w.stBg }};color:{{ w.stFg }}">{{ w.stop }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= PROJECT INFO ================= -->
+      <sc-if value="{{ isInfo }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="ข้อมูลโครงการ" style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start">
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:18px 20px">
+          <div style="display:flex;align-items:center;margin-bottom:14px">
+            <div style="font:600 14px 'Bai Jamjuree',sans-serif;color:#0F2542">ข้อมูลโครงการ (Project Master)</div>
+            <div style="margin-left:auto;font-size:11.5px;padding:5px 14px;background:#0F2542;color:#fff;border-radius:6px;font-weight:500;cursor:pointer" style-hover="background:#1B3A63">แก้ไขข้อมูล</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:12.5px">
+            <div style="grid-column:1/-1"><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">ชื่อโครงการ</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">อาคารสำนักงานใหญ่ 12 ชั้น — เขตสาทร</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">รหัสโครงการ</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">PRJ-2026-014</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">เจ้าของโครงการ</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">บริษัท สาทรพัฒนา จำกัด</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">วันเริ่มสัญญา</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">1 มิ.ย. 2568</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">วันสิ้นสุดสัญญา</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">30 มิ.ย. 2570 (104 สัปดาห์)</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">มูลค่าสัญญา (BAC ตั้งต้น)</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC;font-weight:600">485,000,000 บาท</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">BAC ปรับปรุง (+VO อนุมัติ)</div><div style="padding:9px 12px;border:1px solid #C9A227;border-radius:6px;color:#0F2542;background:#FBF4DE;font-weight:600">{{ voBac }}</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">Retention</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">5% (เพดาน 10% ของสัญญา)</div></div>
+            <div><div style="font-size:11px;color:#8A8F99;margin-bottom:4px">เงินล่วงหน้า (Advance)</div><div style="padding:9px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#1A2433;background:#FAFAFC">10% · หักคืนตามงวด</div></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:16px 18px">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;margin-bottom:10px">นำเข้าข้อมูลแผนงาน (Import)</div>
+            <div style="display:flex;flex-direction:column;gap:8px;font-size:12px">
+              <div onClick="{{ doImpXer }}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px dashed #C6CBD4;border-radius:7px;cursor:pointer" style-hover="border-color:#B23A3A"><span style="width:26px;height:26px;background:#FBEBEB;color:#B23A3A;border-radius:5px;display:grid;place-items:center;font-size:9px;font-weight:700">XER</span><span style="color:#1A2433">Primavera P6 (.XER)</span><span style="margin-left:auto;color:#8A8F99;font-size:10.5px">เลือกไฟล์</span></div>
+              <div onClick="{{ doImpMpp }}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px dashed #C6CBD4;border-radius:7px;cursor:pointer" style-hover="border-color:#33507A"><span style="width:26px;height:26px;background:#EEF2F8;color:#33507A;border-radius:5px;display:grid;place-items:center;font-size:9px;font-weight:700">MPP</span><span style="color:#1A2433">Microsoft Project (.MPP / MSPDI)</span><span style="margin-left:auto;color:#8A8F99;font-size:10.5px">เลือกไฟล์</span></div>
+              <div onClick="{{ doImpXlsx }}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px dashed #C6CBD4;border-radius:7px;cursor:pointer" style-hover="border-color:#1F7A4D"><span style="width:26px;height:26px;background:#EAF4EE;color:#1F7A4D;border-radius:5px;display:grid;place-items:center;font-size:9px;font-weight:700">XLSX</span><span style="color:#1A2433">เทมเพลตความคืบหน้า Excel</span><span style="margin-left:auto;color:#8A8F99;font-size:10.5px">เลือกไฟล์</span></div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:16px 18px">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;margin-bottom:10px">ประวัติการนำเข้าล่าสุด</div>
+            <div style="display:flex;flex-direction:column;gap:8px;font-size:11.5px;color:#5A6472">
+              <div style="display:flex;gap:8px"><span style="color:#1F7A4D">✓</span>baseline_rev2.xer · 128 กิจกรรม · 8 ก.ค. 2569</div>
+              <div style="display:flex;gap:8px"><span style="color:#1F7A4D">✓</span>progress_w57.xlsx · อัปเดต 42 กิจกรรม · 4 ก.ค. 2569</div>
+              <div style="display:flex;gap:8px"><span style="color:#B23A3A">✕</span>schedule_v3.mpp · ปฏิทินไม่ครบ (ยกเลิก) · 1 ก.ค. 2569</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= ISSUE LOG ================= -->
+      <sc-if value="{{ isIssue }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Issue / Action Log" style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">ทั้งหมด</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#0F2542">{{ issueTotal }}</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">เปิดอยู่ (Open)</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#B23A3A">{{ issueOpen }}</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">กำลังแก้ไข</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#9A7B1B">{{ issueDoing }}</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">ปิดแล้ว</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#1F7A4D">{{ issueClosed }}</div></div>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+          <div style="display:flex;align-items:center;padding:12px 16px">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">ปัญหาหน้างาน / Action Log — กดปุ่มเพื่อเลื่อนสถานะ</div>
+            <div onClick="{{ addIssue }}" style="margin-left:auto;font-size:11.5px;padding:6px 14px;background:#0F2542;color:#fff;border-radius:6px;font-weight:600;cursor:pointer" style-hover="background:#1B3A63">+ แจ้งปัญหาใหม่</div>
+          </div>
+          <div style="display:grid;grid-template-columns:76px 1fr 130px 110px 100px 120px;font-size:11.5px">
+            <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">เลขที่</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">ปัญหา / รายละเอียด</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">ผู้รับผิดชอบ</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">กำหนดแก้ไข</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">สถานะ</div>
+            <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">การดำเนินการ</div>
+            <sc-for list="{{ issueRows }}" as="i" hint-placeholder-count="5">
+              <div style="padding:10px 0 10px 16px;border-top:1px solid #F0F1F4;color:#8A8F99">{{ i.no }}</div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4"><div style="color:#1A2433;font-weight:500">{{ i.title }}</div><div style="color:#8A8F99;font-size:10.5px">{{ i.detail }}</div></div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4;color:#5A6472">{{ i.owner }}</div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4;color:#5A6472">{{ i.due }}</div>
+              <div style="padding:10px 8px;border-top:1px solid #F0F1F4;text-align:right"><span style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ i.stBg }};color:{{ i.stFg }}">{{ i.status }}</span></div>
+              <div style="padding:8px 16px 8px 8px;border-top:1px solid #F0F1F4;display:flex;justify-content:flex-end;align-items:center">
+                <sc-if value="{{ i.canNext }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ i.next }}" style="font-size:11px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#0F2542;font-weight:600;cursor:pointer" style-hover="border-color:#0F2542">{{ i.nextLabel }}</div>
+                </sc-if>
+                <sc-if value="{{ i.isClosed }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-size:10.5px;color:#8A8F99">ปิดเมื่อ {{ i.closedDate }}</span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= MAN/EQ ================= -->
+      <sc-if value="{{ isManeq }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Manpower / Equipment" style="display:flex;flex-direction:column;gap:16px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">กำลังคนวันนี้</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#0F2542">186 คน</div><div style="font-size:10.5px;color:#B23A3A">แผน 205 คน (−19)</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">เครื่องจักรทำงาน</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#0F2542">14 / 16</div><div style="font-size:10.5px;color:#8A8F99">Tower Crane ซ่อม 1</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">ชม.ทำงานสะสม (เดือนนี้)</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#0F2542">38,420 ชม.</div></div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:12px 14px"><div style="font-size:11px;color:#8A8F99">Productivity เฉลี่ย</div><div style="font:700 22px 'Bai Jamjuree',sans-serif;color:#1F7A4D">0.97</div><div style="font-size:10.5px;color:#8A8F99">EV ต่อ ชม.แรงงาน / แผน</div></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:start">
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+            <div style="display:flex;align-items:center;padding:12px 16px">
+              <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">บันทึกกำลังคน/เครื่องจักรรายวัน</div>
+              <div style="margin-left:auto;font-size:11.5px;padding:6px 14px;background:#0F2542;color:#fff;border-radius:6px;font-weight:600;cursor:pointer" style-hover="background:#1B3A63">+ บันทึกวันนี้</div>
+            </div>
+            <div style="display:grid;grid-template-columns:100px 1fr 84px 84px 110px;font-size:11.5px">
+              <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">วันที่</div>
+              <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">หมวดงานหลัก</div>
+              <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">คน</div>
+              <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">เครื่องจักร</div>
+              <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">เทียบแผน</div>
+              <sc-for list="{{ maneqRows }}" as="m" hint-placeholder-count="6">
+                <div style="padding:9px 0 9px 16px;border-top:1px solid #F0F1F4;color:#1A2433">{{ m.date }}</div>
+                <div style="padding:9px 8px;border-top:1px solid #F0F1F4;color:#5A6472">{{ m.work }}</div>
+                <div style="padding:9px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#1A2433;font-weight:600">{{ m.men }}</div>
+                <div style="padding:9px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472">{{ m.eq }}</div>
+                <div style="padding:9px 16px 9px 8px;border-top:1px solid #F0F1F4;text-align:right;font-weight:600;color:{{ m.dColor }}">{{ m.delta }}</div>
+              </sc-for>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:16px 18px">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;margin-bottom:12px">Histogram กำลังคน 7 วันล่าสุด</div>
+            <div style="display:flex;align-items:flex-end;gap:8px;height:120px">
+              <sc-for list="{{ manBars }}" as="b" hint-placeholder-count="7">
+                <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;height:100%;justify-content:flex-end">
+                  <div style="font-size:9px;color:#8A8F99">{{ b.men }}</div>
+                  <div style="width:100%;border-radius:3px 3px 0 0;background:{{ b.bg }};height:{{ b.h }}"></div>
+                  <div style="font-size:9px;color:#8A8F99">{{ b.day }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="display:flex;gap:14px;font-size:10.5px;color:#8A8F99;margin-top:10px">
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:8px;background:#33507A;border-radius:2px;display:inline-block"></span>ตามแผน ±5%</span>
+              <span style="display:flex;align-items:center;gap:5px"><span style="width:12px;height:8px;background:#B23A3A;border-radius:2px;display:inline-block"></span>ต่ำกว่าแผน</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ================= BASELINE ================= -->
+      <sc-if value="{{ isBaseline }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Baseline" style="display:flex;flex-direction:column;gap:16px">
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;overflow:hidden">
+          <div style="display:flex;align-items:center;padding:12px 16px">
+            <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542">จัดการ Baseline — เลือก Active Baseline สำหรับเทียบแผน/พยากรณ์</div>
+            <div style="margin-left:auto;font-size:11.5px;padding:6px 14px;background:#0F2542;color:#fff;border-radius:6px;font-weight:600;cursor:pointer" style-hover="background:#1B3A63">+ บันทึก Baseline ใหม่</div>
+          </div>
+          <div style="display:grid;grid-template-columns:80px 1fr 120px 110px 110px 90px 150px;font-size:11.5px">
+            <div style="padding:7px 0 7px 16px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">รหัส</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">ชื่อ Baseline</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px">วันที่บันทึก</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">วันสิ้นสุดตามแผน</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">BAC (MB)</div>
+            <div style="padding:7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">สถานะ</div>
+            <div style="padding:7px 16px 7px 8px;background:#F7F8FA;color:#8A8F99;font-size:10.5px;text-align:right">การดำเนินการ</div>
+            <sc-for list="{{ blRows }}" as="b" hint-placeholder-count="3">
+              <div style="padding:11px 0 11px 16px;border-top:1px solid #F0F1F4;color:#8A8F99;background:{{ b.rowBg }}">{{ b.code }}</div>
+              <div style="padding:11px 8px;border-top:1px solid #F0F1F4;color:#1A2433;font-weight:500;background:{{ b.rowBg }}">{{ b.name }} <span style="font-size:10px;color:#8A8F99">{{ b.lock }}</span></div>
+              <div style="padding:11px 8px;border-top:1px solid #F0F1F4;color:#5A6472;background:{{ b.rowBg }}">{{ b.saved }}</div>
+              <div style="padding:11px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;background:{{ b.rowBg }}">{{ b.finish }}</div>
+              <div style="padding:11px 8px;border-top:1px solid #F0F1F4;text-align:right;color:#5A6472;background:{{ b.rowBg }}">{{ b.bac }}</div>
+              <div style="padding:11px 8px;border-top:1px solid #F0F1F4;text-align:right;background:{{ b.rowBg }}"><span style="padding:3px 9px;border-radius:5px;font-weight:600;font-size:10.5px;background:{{ b.stBg }};color:{{ b.stFg }}">{{ b.st }}</span></div>
+              <div style="padding:9px 16px 9px 8px;border-top:1px solid #F0F1F4;display:flex;justify-content:flex-end;align-items:center;background:{{ b.rowBg }}">
+                <sc-if value="{{ b.canActivate }}" hint-placeholder-val="{{ false }}">
+                  <div onClick="{{ b.activate }}" style="font-size:11px;padding:5px 12px;border:1px solid #E3E5EA;border-radius:6px;color:#0F2542;font-weight:600;cursor:pointer" style-hover="border-color:#C9A227;color:#C9A227">ตั้งเป็น Active</div>
+                </sc-if>
+                <sc-if value="{{ b.isActive }}" hint-placeholder-val="{{ true }}">
+                  <span style="font-size:10.5px;color:#C9A227;font-weight:600">★ ใช้เทียบอยู่</span>
+                </sc-if>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="background:#fff;border:1px solid #E3E5EA;border-radius:8px;padding:16px 18px">
+          <div style="font:600 13.5px 'Bai Jamjuree',sans-serif;color:#0F2542;margin-bottom:12px">เปรียบเทียบแผนปัจจุบัน vs {{ activeBlName }}</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;font-size:12px">
+            <div style="padding:12px 14px;background:#FAFAFC;border:1px solid #F0F1F4;border-radius:7px"><div style="color:#8A8F99;font-size:11px">วันสิ้นสุดโครงการ</div><div style="font:700 17px 'Bai Jamjuree',sans-serif;color:#B23A3A">+8 วัน</div><div style="font-size:10.5px;color:#8A8F99">เลื่อนจาก Baseline</div></div>
+            <div style="padding:12px 14px;background:#FAFAFC;border:1px solid #F0F1F4;border-radius:7px"><div style="color:#8A8F99;font-size:11px">กิจกรรมเลื่อน (Drift)</div><div style="font:700 17px 'Bai Jamjuree',sans-serif;color:#0F2542">23 / 128</div><div style="font-size:10.5px;color:#8A8F99">กิจกรรมช้ากว่า Target</div></div>
+            <div style="padding:12px 14px;background:#FAFAFC;border:1px solid #F0F1F4;border-radius:7px"><div style="color:#8A8F99;font-size:11px">งบประมาณ (BAC)</div><div style="font:700 17px 'Bai Jamjuree',sans-serif;color:#1F7A4D">+7.4 MB</div><div style="font-size:10.5px;color:#8A8F99">จาก VO อนุมัติ</div></div>
+            <div style="padding:12px 14px;background:#FAFAFC;border:1px solid #F0F1F4;border-radius:7px"><div style="color:#8A8F99;font-size:11px">Critical Path</div><div style="font:700 17px 'Bai Jamjuree',sans-serif;color:#B23A3A">เปลี่ยนเส้นทาง</div><div style="font-size:10.5px;color:#8A8F99">ผ่าน Curtain Wall แทน MEP</div></div>
+          </div>
+          <div style="font-size:11px;color:#8A8F99;margin-top:10px">แถบ Baseline สีทองแสดงคู่กับแผนปัจจุบันในหน้า Gantt / CPM</div>
+        </div>
+      </div>
+      </sc-if>
+
+    </div>
+  </div>
+
+  <!-- toast -->
+  <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;right:22px;bottom:22px;background:#0F2542;color:#fff;padding:12px 18px;border-radius:8px;font-size:12.5px;box-shadow:0 6px 20px rgba(15,37,66,.35);display:flex;align-items:center;gap:10px;z-index:50">
+      <span style="width:8px;height:8px;border-radius:50%;background:#C9A227"></span>{{ toast }}
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;: {&quot;width&quot;: 1440, &quot;height&quot;: 860}}">
+class Component extends DCLogic {
+  state = {
+    page: 'dashboard',
+    expanded: { '1': true },
+    criticalOnly: false,
+    zone: 'all',
+    selectedPay: 14,
+    toast: '',
+    activeBl: 'BL-1',
+    issues: [
+      { no: 'ISS-024', title: 'น้ำรั่วซึมผนัง Basement โซน B', detail: 'พบคราบน้ำหลังฝนตกหนัก 8 ก.ค.', owner: 'วิศวกรโครงสร้าง', due: '18 ก.ค. 2569', status: 'open' },
+      { no: 'ISS-023', title: 'เหล็กเส้น DB25 ส่งช้า', detail: 'ซัพพลายเออร์แจ้งเลื่อน 5 วัน กระทบชั้น 9', owner: 'จัดซื้อ', due: '15 ก.ค. 2569', status: 'doing' },
+      { no: 'ISS-022', title: 'แบบ Shop Drawing ลิฟต์ยังไม่อนุมัติ', detail: 'รอผู้ออกแบบตอบ RFI-041', owner: 'CM สำนักงาน', due: '14 ก.ค. 2569', status: 'doing' },
+      { no: 'ISS-021', title: 'ทางเข้าไซต์ฝั่งตะวันออกน้ำขัง', detail: 'ปรับระดับและลงหินคลุกแล้ว', owner: 'โฟร์แมนโยธา', due: '10 ก.ค. 2569', status: 'closed', closedDate: '9 ก.ค. 2569' },
+      { no: 'ISS-020', title: 'เสียงรบกวนเกินเกณฑ์ช่วงเย็น', detail: 'ปรับเวลางาน Demolition เรียบร้อย', owner: 'Safety', due: '5 ก.ค. 2569', status: 'closed', closedDate: '4 ก.ค. 2569' },
+    ],
+    vos: [
+      { no: 'VO-018', title: 'งานเพิ่มกันสาดอลูมิเนียมทางเข้าหลัก', type: 'Add', amount: 2.4, status: 'pending' },
+      { no: 'VO-017', title: 'เพิ่มจุดจ่ายไฟสำรองชั้นดาดฟ้า', type: 'Add', amount: 1.1, status: 'pending' },
+      { no: 'VO-016', title: 'เปลี่ยนสเปกกระเบื้องโถงลิฟต์', type: 'Add', amount: 0.6, status: 'pending' },
+      { no: 'VO-015', title: 'ยกเลิกงานรั้วชั่วคราวฝั่งตะวันออก', type: 'Deduct', amount: -0.8, status: 'approved' },
+      { no: 'VO-014', title: 'เพิ่มเสาเข็มเจาะโซนลานจอด 12 ต้น', type: 'Add', amount: 3.2, status: 'approved' },
+      { no: 'VO-012', title: 'งานกันซึมดาดฟ้าเพิ่มเติม', type: 'Add', amount: 1.4, status: 'approved' },
+    ],
+    weather: [
+      { date: '11 ก.ค. 2569', cond: 'ฝนตกหนัก', mm: '42.5', impact: 'หยุดเทคอนกรีตโซน B ครึ่งวัน', stop: true },
+      { date: '10 ก.ค. 2569', cond: 'ฝนปรอยๆ', mm: '8.2', impact: 'ทำงานได้ปกติ', stop: false },
+      { date: '9 ก.ค. 2569', cond: 'แดดจัด', mm: '0', impact: '—', stop: false },
+      { date: '8 ก.ค. 2569', cond: 'ฝนตกหนักมาก', mm: '61.0', impact: 'หยุดงานภายนอกทั้งวัน', stop: true },
+      { date: '7 ก.ค. 2569', cond: 'ครึ้มฟ้าครึ้มฝน', mm: '2.1', impact: 'ทำงานได้ปกติ', stop: false },
+      { date: '6 ก.ค. 2569', cond: 'ฝนตกปานกลาง', mm: '18.4', impact: 'เลื่อนงานทาสีภายนอก', stop: false },
+      { date: '5 ก.ค. 2569', cond: 'แดดจัด', mm: '0', impact: '—', stop: false },
+    ],
+  };
+
+  wbsData = [
+    { code: '1', name: 'งานโครงสร้าง คสล.', weight: '38%', dur: '420 วัน', prog: 66, status: 'ล่าช้า', children: [
+      { code: '1.1', name: 'ACT-210 เสาและผนังรับแรงชั้น 8', weight: '2.1%', dur: '14 วัน', prog: 100, status: 'เสร็จ' },
+      { code: '1.2', name: 'ACT-214 เทคอนกรีตพื้นชั้น 9 (โซน B)', weight: '1.8%', dur: '10 วัน', prog: 45, status: 'วิกฤต' },
+      { code: '1.3', name: 'ACT-218 เสาและผนังรับแรงชั้น 9', weight: '2.1%', dur: '14 วัน', prog: 0, status: 'รอเริ่ม' },
+    ]},
+    { code: '2', name: 'งานสถาปัตยกรรม', weight: '27%', dur: '360 วัน', prog: 41, status: 'ล่าช้า', children: [
+      { code: '2.1', name: 'ACT-198 ติดตั้ง Curtain Wall ชั้น 5–6', weight: '2.4%', dur: '21 วัน', prog: 62, status: 'วิกฤต' },
+      { code: '2.2', name: 'ACT-202 งานก่ออิฐฉาบปูนชั้น 4', weight: '1.2%', dur: '18 วัน', prog: 88, status: 'ตามแผน' },
+    ]},
+    { code: '3', name: 'งานระบบ MEP', weight: '22%', dur: '400 วัน', prog: 37, status: 'ตามแผน', children: [
+      { code: '3.1', name: 'ACT-231 งานท่อและราง MEP ชั้น 3', weight: '1.6%', dur: '25 วัน', prog: 54, status: 'เฝ้าระวัง' },
+      { code: '3.2', name: 'ACT-235 ติดตั้ง AHU ชั้น 2', weight: '0.9%', dur: '12 วัน', prog: 30, status: 'ตามแผน' },
+    ]},
+    { code: '4', name: 'งานภายนอกและภูมิทัศน์', weight: '13%', dur: '180 วัน', prog: 8, status: 'รอเริ่ม', children: [
+      { code: '4.1', name: 'ACT-186 ฐานราก Tower Crane 2', weight: '0.7%', dur: '9 วัน', prog: 20, status: 'ตามแผน' },
+    ]},
+  ];
+
+  ganttData = [
+    { name: 'งานเสาเข็มและฐานราก', meta: 'ACT-101 · เสร็จแล้ว', start: 0, dur: 16, prog: 100, critical: false, blStart: 0, blDur: 15 },
+    { name: 'โครงสร้าง คสล. ชั้น 1–5', meta: 'ACT-150 · เสร็จแล้ว', start: 10, dur: 22, prog: 100, critical: true, blStart: 10, blDur: 20 },
+    { name: 'โครงสร้าง คสล. ชั้น 6–9', meta: 'ACT-214 · TF 0 · ช้า 3 วัน', start: 30, dur: 26, prog: 62, critical: true, blStart: 29, blDur: 24 },
+    { name: 'ติดตั้ง Curtain Wall ชั้น 5–6', meta: 'ACT-198 · TF 0 · ช้า 1 วัน', start: 44, dur: 18, prog: 62, critical: true, blStart: 43, blDur: 17 },
+    { name: 'งานก่ออิฐฉาบปูนชั้น 1–4', meta: 'ACT-202 · TF 6', start: 38, dur: 20, prog: 88, critical: false, blStart: 38, blDur: 20 },
+    { name: 'งานระบบ MEP ชั้น 1–3', meta: 'ACT-231 · TF 2', start: 42, dur: 24, prog: 54, critical: false, blStart: 42, blDur: 22 },
+    { name: 'ฐานราก Tower Crane 2', meta: 'ACT-186 · TF 0', start: 52, dur: 8, prog: 20, critical: true, blStart: 52, blDur: 8 },
+    { name: 'งานสถาปัตยกรรมภายใน ชั้น 1–3', meta: 'ACT-260 · TF 10', start: 58, dur: 26, prog: 0, critical: false, blStart: 58, blDur: 26 },
+    { name: 'งานภายนอกและภูมิทัศน์', meta: 'ACT-300 · TF 14', start: 74, dur: 24, prog: 0, critical: false, blStart: 74, blDur: 24 },
+  ];
+
+  payData = [
+    { no: 16, desc: 'โครงสร้าง คสล. ชั้น 10 + MEP ชั้น 4', value: 22.8, prog: '—', actual: '0%', claim: '—', approve: '—', status: 'future' },
+    { no: 15, desc: 'โครงสร้าง คสล. ชั้น 9 + Curtain Wall ชั้น 6', value: 21.2, prog: '—', actual: '25%', claim: '—', approve: '—', status: 'future' },
+    { no: 14, desc: 'โครงสร้าง คสล. ชั้น 8 + งานสถาปัตย์ชั้น 3–4', value: 21.6, prog: '100%', actual: '100%', claim: '100%', approve: '100%', status: 'checked' },
+    { no: 13, desc: 'โครงสร้าง คสล. ชั้น 7 + MEP ชั้น 2', value: 19.4, prog: '100%', actual: '100%', claim: '100%', approve: '100%', status: 'paid' },
+    { no: 12, desc: 'โครงสร้าง คสล. ชั้น 6 + Curtain Wall ชั้น 3–4', value: 20.1, prog: '100%', actual: '100%', claim: '100%', approve: '100%', status: 'paid' },
+    { no: 11, desc: 'โครงสร้าง คสล. ชั้น 5 + งานก่ออิฐชั้น 1–2', value: 18.7, prog: '100%', actual: '100%', claim: '100%', approve: '100%', status: 'paid' },
+  ];
+
+  maneqData = [
+    { date: '11 ก.ค. 2569', work: 'โครงสร้าง ชั้น 9 + Curtain Wall', men: 186, eq: 14, plan: 205 },
+    { date: '10 ก.ค. 2569', work: 'โครงสร้าง ชั้น 9 + MEP ชั้น 3', men: 198, eq: 15, plan: 205 },
+    { date: '9 ก.ค. 2569', work: 'โครงสร้าง + สถาปัตย์ ชั้น 4', men: 204, eq: 16, plan: 205 },
+    { date: '8 ก.ค. 2569', work: 'หยุดงานภายนอก (ฝนหนัก)', men: 92, eq: 6, plan: 205 },
+    { date: '7 ก.ค. 2569', work: 'โครงสร้าง ชั้น 8–9', men: 201, eq: 15, plan: 200 },
+    { date: '6 ก.ค. 2569', work: 'โครงสร้าง + ก่ออิฐ ชั้น 4', men: 195, eq: 14, plan: 200 },
+    { date: '5 ก.ค. 2569', work: 'โครงสร้าง ชั้น 8', men: 199, eq: 15, plan: 200 },
+  ];
+
+  blData = [
+    { code: 'BL-0', name: 'Original Baseline (สัญญา)', lock: '🔒 ล็อกถาวร', saved: '1 มิ.ย. 2568', finish: '30 มิ.ย. 2570', bac: '485.0' },
+    { code: 'BL-1', name: 'Revised Baseline — Rev.2 (+VO)', lock: '', saved: '8 ก.ค. 2569', finish: '8 ก.ค. 2570', bac: '492.4' },
+    { code: 'BL-2', name: 'What-if — เร่งงานโครงสร้าง', lock: 'ฉบับร่าง', saved: '10 ก.ค. 2569', finish: '30 มิ.ย. 2570', bac: '495.1' },
+  ];
+
+  photoData = [
+    { title: 'เทคอนกรีตพื้นชั้น 9', meta: '11 ก.ค. 2569 · 09:40 · โซน B', zone: 'B', act: 'ACT-214', prog: '45%', slot: 'photo: slab F9 zone B' },
+    { title: 'ติดตั้ง Curtain Wall ชั้น 6', meta: '11 ก.ค. 2569 · 09:12 · โซน A', zone: 'A', act: 'ACT-198', prog: '62%', slot: 'photo: curtain wall F6' },
+    { title: 'งานท่อ MEP ชั้น 3', meta: '10 ก.ค. 2569 · 16:20 · โซน C', zone: 'C', act: 'ACT-231', prog: '54%', slot: 'photo: MEP F3' },
+    { title: 'ผูกเหล็กเสาชั้น 9', meta: '10 ก.ค. 2569 · 11:05 · โซน B', zone: 'B', act: 'ACT-218', prog: '10%', slot: 'photo: rebar F9' },
+    { title: 'งานก่ออิฐชั้น 4', meta: '9 ก.ค. 2569 · 15:44 · โซน A', zone: 'A', act: 'ACT-202', prog: '88%', slot: 'photo: masonry F4' },
+    { title: 'ฐานราก Tower Crane 2', meta: '9 ก.ค. 2569 · 08:30 · โซน C', zone: 'C', act: 'ACT-186', prog: '20%', slot: 'photo: TC2 foundation' },
+    { title: 'ติดตั้ง AHU ชั้น 2', meta: '8 ก.ค. 2569 · 14:10 · โซน A', zone: 'A', act: 'ACT-235', prog: '30%', slot: 'photo: AHU F2' },
+    { title: 'สภาพหน้างานหลังฝนตก', meta: '8 ก.ค. 2569 · 08:05 · โซน B', zone: 'B', act: 'Weather Log', prog: 'หยุดงาน', slot: 'photo: site after rain' },
+  ];
+
+  nav(page) { this.setState({ page }); }
+
+  renderVals() {
+    const s = this.state;
+    const pages = [
+      ['dashboard', 'Executive Dashboard'], ['info', 'ข้อมูลโครงการ'], ['wbs', 'WBS & Activity'], ['gantt', 'Gantt / CPM'],
+      ['evm', 'EVM S-Curve'], ['cash', 'Cash Flow'], ['payment', 'Payment Certificate'],
+      ['photo', 'Photo Progress'], ['vo', 'Variation Order'], ['issue', 'Issue / Action Log'],
+      ['weather', 'Weather Log'], ['maneq', 'Man / Equipment'], ['baseline', 'Baseline'],
+    ];
+    const navRows = pages.map(([id, label]) => {
+      const active = s.page === id;
+      return {
+        label, go: () => this.nav(id),
+        bg: active ? '#C9A227' : 'transparent',
+        hoverBg: active ? '#C9A227' : 'rgba(255,255,255,.08)',
+        fg: active ? '#0F2542' : 'rgba(255,255,255,.75)',
+        fw: active ? '600' : '400',
+        dotBg: active ? '#0F2542' : 'transparent',
+        dotBorder: active ? 'none' : '1.5px solid rgba(255,255,255,.5)',
+      };
+    });
+    const titles = Object.fromEntries(pages);
+
+    // WBS rows
+    const stBadge = (st) => ({
+      'เสร็จ': ['#EAF4EE', '#1F7A4D'], 'ตามแผน': ['#EAF4EE', '#1F7A4D'], 'วิกฤต': ['#FBEBEB', '#B23A3A'],
+      'ล่าช้า': ['#FBEBEB', '#B23A3A'], 'เฝ้าระวัง': ['#FBF4DE', '#9A7B1B'], 'รอเริ่ม': ['#EDEEF2', '#5A6472'],
+    }[st] || ['#EDEEF2', '#5A6472']);
+    const wbsRows = [];
+    this.wbsData.forEach(parent => {
+      const open = !!s.expanded[parent.code];
+      const [bg, fg] = stBadge(parent.status);
+      wbsRows.push({
+        code: parent.code, name: parent.name, weight: parent.weight, dur: parent.dur,
+        prog: parent.prog + '%', progW: parent.prog + '%', status: parent.status, stBg: bg, stFg: fg,
+        indent: '8px', fw: '600', caret: open ? '▼' : '►', rowBg: '#FAFAFC',
+        toggle: () => this.setState(st2 => ({ expanded: { ...st2.expanded, [parent.code]: !st2.expanded[parent.code] } })),
+      });
+      if (open) parent.children.forEach(ch => {
+        const [cbg, cfg] = stBadge(ch.status);
+        wbsRows.push({
+          code: ch.code, name: ch.name, weight: ch.weight, dur: ch.dur,
+          prog: ch.prog + '%', progW: ch.prog + '%', status: ch.status, stBg: cbg, stFg: cfg,
+          indent: '30px', fw: '400', caret: '', rowBg: '#fff', toggle: () => {},
+        });
+      });
+    });
+
+    // Gantt
+    const span = 104;
+    const ganttRows = this.ganttData
+      .filter(g => !s.criticalOnly || g.critical)
+      .map(g => ({
+        name: g.name, meta: g.meta,
+        barBg: g.critical ? '#B23A3A' : '#33507A',
+        left: (g.start / span * 100).toFixed(1) + '%',
+        width: (g.dur / span * 100).toFixed(1) + '%',
+        progW: g.prog + '%',
+        blLeft: (g.blStart / span * 100).toFixed(1) + '%',
+        blWidth: (g.blDur / span * 100).toFixed(1) + '%',
+      }));
+
+    // Payments
+    const payBadge = { paid: ['จ่ายแล้ว', '#EAF4EE', '#1F7A4D'], checked: ['ตรวจรับแล้ว', '#FBF4DE', '#9A7B1B'], future: ['ยังไม่ถึงงวด', '#EDEEF2', '#5A6472'] };
+    const payRows = this.payData.map(p => {
+      const [label, bg, fg] = payBadge[p.status];
+      return {
+        no: p.no, desc: p.desc, value: p.value.toFixed(1), status: label, stBg: bg, stFg: fg,
+        actual: p.actual, claim: p.claim, approve: p.approve,
+        rowBg: s.selectedPay === p.no ? '#FBF4DE' : '#fff',
+        view: () => this.setState({ selectedPay: p.no }),
+      };
+    });
+    const sel = this.payData.find(p => p.no === s.selectedPay) || this.payData[2];
+    const ret = sel.value * 0.05;
+
+    // Photos
+    const zones = [['all', 'ทั้งหมด'], ['A', 'โซน A'], ['B', 'โซน B'], ['C', 'โซน C']];
+    const zoneChips = zones.map(([id, label]) => ({
+      label, pick: () => this.setState({ zone: id }),
+      bg: s.zone === id ? '#0F2542' : '#fff', fg: s.zone === id ? '#fff' : '#5A6472',
+      border: s.zone === id ? '#0F2542' : '#E3E5EA',
+    }));
+    const photoRows = this.photoData.filter(p => s.zone === 'all' || p.zone === s.zone);
+
+    // VO
+    const voBadge = { pending: ['รออนุมัติ', '#FBF4DE', '#9A7B1B'], approved: ['อนุมัติแล้ว', '#EAF4EE', '#1F7A4D'], rejected: ['ตีกลับ', '#FBEBEB', '#B23A3A'] };
+    const voRows = s.vos.map((v, i) => {
+      const [label, bg, fg] = voBadge[v.status];
+      return {
+        no: v.no, title: v.title, amount: (v.amount > 0 ? '+' : '') + v.amount.toFixed(1),
+        type: v.type === 'Add' ? 'งานเพิ่ม' : 'งานลด',
+        typeBg: v.type === 'Add' ? '#EEF2F8' : '#FBEBEB', typeFg: v.type === 'Add' ? '#33507A' : '#B23A3A',
+        status: label, stBg: bg, stFg: fg,
+        pending: v.status === 'pending', done: v.status !== 'pending',
+        doneNote: v.status === 'approved' ? 'ปรับ BAC แล้ว' : 'แจ้งผู้รับเหมาแล้ว',
+        approve: () => this.setVo(i, 'approved'),
+        reject: () => this.setVo(i, 'rejected'),
+      };
+    });
+    const appr = s.vos.filter(v => v.status === 'approved');
+    const pend = s.vos.filter(v => v.status === 'pending');
+    const apprSum = appr.reduce((a, v) => a + v.amount, 0);
+    const pendSum = pend.reduce((a, v) => a + v.amount, 0);
+
+    // Issues
+    const issBadge = { open: ['เปิดอยู่', '#FBEBEB', '#B23A3A'], doing: ['กำลังแก้ไข', '#FBF4DE', '#9A7B1B'], closed: ['ปิดแล้ว', '#EAF4EE', '#1F7A4D'] };
+    const issueRows = s.issues.map((it, i) => {
+      const [label, bg, fg] = issBadge[it.status];
+      return {
+        no: it.no, title: it.title, detail: it.detail, owner: it.owner, due: it.due,
+        status: label, stBg: bg, stFg: fg,
+        canNext: it.status !== 'closed', isClosed: it.status === 'closed',
+        nextLabel: it.status === 'open' ? 'เริ่มแก้ไข →' : 'ปิดปัญหา ✓',
+        closedDate: it.closedDate || '',
+        next: () => this.nextIssue(i),
+      };
+    });
+
+    // Man/Eq
+    const maneqRows = this.maneqData.map(m => {
+      const d = m.men - m.plan;
+      return {
+        date: m.date, work: m.work, men: m.men + ' คน', eq: m.eq + ' เครื่อง',
+        delta: (d >= 0 ? '+' : '') + d + ' คน',
+        dColor: d >= -10 ? '#1F7A4D' : '#B23A3A',
+      };
+    });
+    const manBars = [...this.maneqData].reverse().map(m => ({
+      men: m.men, day: m.date.split(' ')[0],
+      h: Math.round(m.men / 220 * 100) + '%',
+      bg: (m.men >= m.plan * 0.95) ? '#33507A' : '#B23A3A',
+    }));
+
+    // Baseline
+    const blRows = this.blData.map(b => {
+      const active = s.activeBl === b.code;
+      return {
+        code: b.code, name: b.name, lock: b.lock, saved: b.saved, finish: b.finish, bac: b.bac,
+        st: active ? 'Active' : (b.code === 'BL-0' ? 'อ้างอิงสัญญา' : 'สำรอง'),
+        stBg: active ? '#FBF4DE' : '#EDEEF2', stFg: active ? '#9A7B1B' : '#5A6472',
+        rowBg: active ? '#FDFBF2' : '#fff',
+        isActive: active, canActivate: !active,
+        activate: () => { this.setState({ activeBl: b.code }); this.showToast('ตั้ง ' + b.code + ' เป็น Active Baseline แล้ว — Gantt และ S-Curve ใช้เทียบทันที'); },
+      };
+    });
+    const activeBlObj = this.blData.find(b => b.code === s.activeBl) || this.blData[0];
+
+    // Weather
+    const weatherRows = s.weather.map(w => ({
+      date: w.date, cond: w.cond, mm: w.mm, impact: w.impact,
+      stop: w.stop ? 'หยุดงาน' : 'ทำงานปกติ',
+      stBg: w.stop ? '#FBEBEB' : '#EAF4EE', stFg: w.stop ? '#B23A3A' : '#1F7A4D',
+    }));
+
+    return {
+      pageTitle: titles[s.page],
+      isDashboard: s.page === 'dashboard', isWbs: s.page === 'wbs', isGantt: s.page === 'gantt',
+      isEvm: s.page === 'evm', isCash: s.page === 'cash', isPayment: s.page === 'payment',
+      isPhoto: s.page === 'photo', isVo: s.page === 'vo', isWeather: s.page === 'weather',
+      isInfo: s.page === 'info', isIssue: s.page === 'issue', isManeq: s.page === 'maneq', isBaseline: s.page === 'baseline',
+
+      toast: s.toast, hasToast: !!s.toast,
+      doCalc: () => this.showToast('คำนวณ CPM + EVM ใหม่แล้ว · 128 กิจกรรม · 0.4 วินาที'),
+      doExcel: () => this.showToast('กำลังส่งออก Excel (.xlsx) — ตารางกิจกรรม + ความสัมพันธ์...'),
+      doMpp: () => this.showToast('กำลังส่งออก Microsoft Project (MSPDI/.MPP)...'),
+      doXer: () => this.showToast('กำลังส่งออก Primavera P6 (.XER)...'),
+      doPdf: () => this.showToast('กำลังสร้างรายงาน PDF ผู้บริหาร — S-Curve + รูปหน้างาน...'),
+      doImpXer: () => this.showToast('เปิดหน้าต่างเลือกไฟล์ .XER — ระบบจะตรวจ Orphaned Records อัตโนมัติ'),
+      doImpMpp: () => this.showToast('เปิดหน้าต่างเลือกไฟล์ .MPP / MSPDI...'),
+      doImpXlsx: () => this.showToast('เปิดหน้าต่างเลือกไฟล์เทมเพลตความคืบหน้า .xlsx...'),
+
+      issueRows, addIssue: () => this.addIssueRow(),
+      issueTotal: s.issues.length,
+      issueOpen: s.issues.filter(i => i.status === 'open').length,
+      issueDoing: s.issues.filter(i => i.status === 'doing').length,
+      issueClosed: s.issues.filter(i => i.status === 'closed').length,
+
+      maneqRows, manBars,
+      blRows, activeBlName: activeBlObj.name,
+      navRows,
+      goWbs: () => this.nav('wbs'), goGantt: () => this.nav('gantt'), goEvm: () => this.nav('evm'),
+      goPayment: () => this.nav('payment'), goPhoto: () => this.nav('photo'), goWeather: () => this.nav('weather'),
+
+      criticalTop: [
+        { name: 'เทคอนกรีตพื้นชั้น 9 (โซน B)', meta: 'ACT-214 · TF = 0', badge: 'ช้า 3 วัน', badgeBg: '#FBEBEB', badgeFg: '#B23A3A' },
+        { name: 'ติดตั้งผนัง Curtain Wall ชั้น 5–6', meta: 'ACT-198 · TF = 0', badge: 'ช้า 1 วัน', badgeBg: '#FBEBEB', badgeFg: '#B23A3A' },
+        { name: 'งานระบบ MEP ชั้น 3', meta: 'ACT-231 · TF = 2', badge: 'เฝ้าระวัง', badgeBg: '#FBF4DE', badgeFg: '#9A7B1B' },
+        { name: 'งานฐานรากลิฟต์ Tower Crane 2', meta: 'ACT-186 · TF = 0', badge: 'ตามแผน', badgeBg: '#EAF4EE', badgeFg: '#1F7A4D' },
+      ],
+      wbsSummary: [
+        { code: '1', name: 'งานโครงสร้าง คสล.', weight: '38%', planW: '72%', actW: '66%', delta: '−6%', dColor: '#B23A3A' },
+        { code: '2', name: 'งานสถาปัตยกรรม', weight: '27%', planW: '44%', actW: '41%', delta: '−3%', dColor: '#B23A3A' },
+        { code: '3', name: 'งานระบบ MEP', weight: '22%', planW: '35%', actW: '37%', delta: '+2%', dColor: '#1F7A4D' },
+        { code: '4', name: 'งานภายนอกและภูมิทัศน์', weight: '13%', planW: '8%', actW: '8%', delta: '0%', dColor: '#5A6472' },
+      ],
+
+      wbsRows,
+      expandAll: () => this.setState({ expanded: { '1': true, '2': true, '3': true, '4': true } }),
+      collapseAll: () => this.setState({ expanded: {} }),
+
+      ganttRows,
+      toggleCritical: () => this.setState(st => ({ criticalOnly: !st.criticalOnly })),
+      critBtnLabel: s.criticalOnly ? 'แสดงทุกกิจกรรม' : 'เฉพาะ Critical Path',
+      critBtnBg: s.criticalOnly ? '#B23A3A' : '#fff',
+      critBtnFg: s.criticalOnly ? '#fff' : '#5A6472',
+      critBtnBorder: s.criticalOnly ? '#B23A3A' : '#E3E5EA',
+
+      evmMetrics: [
+        { label: 'BAC', value: '485.0', sub: 'งบประมาณรวม (MB)', color: '#0F2542' },
+        { label: 'PV (BCWS)', value: '285.2', sub: 'มูลค่าตามแผน (MB)', color: '#0F2542' },
+        { label: 'EV (BCWP)', value: '262.9', sub: 'มูลค่าผลงานจริง (MB)', color: '#C9A227' },
+        { label: 'AC (ACWP)', value: '252.8', sub: 'ต้นทุนจริง (MB)', color: '#B23A3A' },
+        { label: 'SV', value: '−22.3', sub: 'EV − PV → ช้ากว่าแผน', color: '#B23A3A' },
+        { label: 'CV', value: '+10.1', sub: 'EV − AC → ต่ำกว่างบ', color: '#1F7A4D' },
+        { label: 'SPI', value: '0.92', sub: 'EV / PV', color: '#B23A3A' },
+        { label: 'CPI', value: '1.04', sub: 'EV / AC', color: '#1F7A4D' },
+        { label: 'EAC', value: '466.3', sub: 'BAC / CPI (MB)', color: '#0F2542' },
+        { label: 'ETC', value: '213.5', sub: 'EAC − AC (MB)', color: '#0F2542' },
+        { label: 'VAC', value: '+18.7', sub: 'BAC − EAC (MB)', color: '#1F7A4D' },
+        { label: '% Complete', value: '54.2%', sub: 'EV / BAC', color: '#0F2542' },
+      ],
+
+      cashBars: [
+        { label: 'งวด 9', value: '17.2', h: '46%', bg: '#33507A', border: 'none' },
+        { label: 'งวด 10', value: '18.0', h: '49%', bg: '#33507A', border: 'none' },
+        { label: 'งวด 11', value: '18.7', h: '51%', bg: '#33507A', border: 'none' },
+        { label: 'งวด 12', value: '20.1', h: '58%', bg: '#33507A', border: 'none' },
+        { label: 'งวด 13', value: '19.4', h: '55%', bg: '#33507A', border: 'none' },
+        { label: 'งวด 14', value: '21.6', h: '64%', bg: '#C9A227', border: 'none' },
+        { label: 'งวด 15', value: '21.2', h: '62%', bg: 'rgba(51,80,122,.18)', border: '1px dashed #33507A' },
+        { label: 'งวด 16', value: '22.8', h: '69%', bg: 'rgba(51,80,122,.18)', border: '1px dashed #33507A' },
+        { label: 'งวด 17', value: '23.5', h: '72%', bg: 'rgba(51,80,122,.18)', border: '1px dashed #33507A' },
+        { label: 'งวด 18', value: '24.0', h: '75%', bg: 'rgba(51,80,122,.18)', border: '1px dashed #33507A' },
+      ],
+
+      payRows,
+      payNo: sel.no, payDesc: sel.desc, payValue: sel.value.toFixed(1),
+      payProg: sel.prog, payRet: ret.toFixed(2), payNet: (sel.value - ret).toFixed(1),
+
+      zoneChips, photoRows,
+
+      voRows,
+      voApprovedSum: (apprSum >= 0 ? '+' : '') + apprSum.toFixed(1) + ' MB',
+      voApprovedCount: appr.length,
+      voPendingSum: '+' + pendSum.toFixed(1) + ' MB',
+      voPendingCount: pend.length,
+      voBac: (485 + apprSum).toFixed(1) + ' MB',
+
+      weatherRows, addWeather: () => this.addWeatherRow(),
+      rainDays: 31 + (s.weather.length - 7),
+      stopDays: s.weather.filter(w => w.stop).length + 7,
+    };
+  }
+
+  showToast(msg) {
+    clearTimeout(this._toastTimer);
+    this.setState({ toast: msg });
+    this._toastTimer = setTimeout(() => this.setState({ toast: '' }), 2800);
+  }
+
+  nextIssue(i) {
+    this.setState(s => ({
+      issues: s.issues.map((it, j) => {
+        if (j !== i) return it;
+        if (it.status === 'open') return { ...it, status: 'doing' };
+        return { ...it, status: 'closed', closedDate: '12 ก.ค. 2569' };
+      }),
+    }));
+  }
+
+  addIssueRow() {
+    this.setState(s => ({
+      issues: [{ no: 'ISS-025', title: 'ปัญหาใหม่ (ตัวอย่างจากปุ่ม)', detail: 'บันทึกโดย สมชาย ว. · 12 ก.ค. 2569', owner: 'รอมอบหมาย', due: '19 ก.ค. 2569', status: 'open' }, ...s.issues],
+    }));
+    this.showToast('บันทึกปัญหาใหม่ ISS-025 แล้ว');
+  }
+
+  setVo(i, status) {
+    this.setState(s => ({ vos: s.vos.map((v, j) => j === i ? { ...v, status } : v) }));
+  }
+
+  addWeatherRow() {
+    this.setState(s => ({
+      weather: [{ date: '12 ก.ค. 2569', cond: 'ฝนตกหนัก', mm: '35.0', impact: 'บันทึกใหม่ — หยุดเทคอนกรีตโซน A', stop: true }, ...s.weather],
+    }));
+  }
+}
+</script>
+</body>
+</html>
