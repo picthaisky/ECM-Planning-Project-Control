@@ -43,3 +43,9 @@ Date: 2026-07-11 · Status: Accepted
 Context: docs/1. §5 and docs/2. risk #3 — site connectivity is unreliable; photo/weather/progress capture must not block on network.
 Decision: Site-facing writes enqueue into an IndexedDB outbox (client-compressed photos included) and flush via Service Worker Background Sync; server wins on schedule data, last-write-wins + audit on site logs.
 Consequences: Every site-module feature ships with offline tests; sync status must be visible in the UI.
+
+## ADR-0006: Adopt the working prototype's navy/gold theme as the design system source of truth
+Date: 2026-07-12 · Status: Accepted
+Context: `docs/3.` describes a "warm orange-brown" palette (`#E26D5C` primary, Inter font) conceptually, but the user has since supplied a working interactive prototype (`docs/ECM Planning Prototype.dc.html` + Standalone export) covering all 13 screens with a concrete, fully worked-out navy/gold visual language (`#0F2542` navy, `#C9A227` gold, IBM Plex Sans Thai + Bai Jamjuree fonts). The prototype is more concrete and functionally complete than the earlier text description and reflects the actual product direction.
+Decision: The prototype HTML files are now the authoritative visual/UX reference. `docs/3.`'s orange-brown narrative is superseded for styling purposes (its architecture content elsewhere remains valid). All frontend work reads `/cmplus-ui` (updated with the real tokens) and the prototype file directly before implementing any screen.
+Consequences: `frontend-developer` and `system-architect` must not reintroduce the old orange palette. Any new screen must first be checked against the prototype's 13-screen nav; screens implied by `docs/6.`'s 15-module list but absent from the prototype (standalone "Executive Summary", standalone "Daily/Weekly Progress") need explicit product confirmation from `po-analyst`/human before being added or dropped — see `.claude/knowledge/domain/modules-map.md`.

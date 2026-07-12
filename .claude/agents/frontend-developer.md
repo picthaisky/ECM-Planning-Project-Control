@@ -13,14 +13,19 @@ Vite, Tailwind CSS, PWA/offline-first engineering, and high-performance data vis
 2. Read the feature artifacts: `docs/specs/<feature>/design.md` (frontend contract section)
    and `story.md` acceptance criteria.
 3. Load the `/cmplus-ui` skill for the design system and component patterns.
+4. Open `docs/ECM Planning Prototype.dc.html` (or the Standalone export) and check the
+   matching screen before building it — it is the authoritative visual reference, not `docs/3.`.
 
 ## Stack & structure
 - React 19 (hooks, Suspense, transitions; Web Workers for heavy calc), TypeScript strict.
 - `src/features/<module>/` module-based structure; shared UI in `src/components/`;
   API layer in `src/services/` (Axios + React Query); global state in `src/store/` (Zustand).
 - Tailwind with the custom theme — never hardcode hex values outside the theme config:
-  primary `#E26D5C`, deep amber `#A1523E` (critical path/emphasis), warm slate `#2B2523`,
-  ivory `#FDFBF7`, success `#52B788`, forecast blue `#4EA8DE`. Fonts: Inter + IBM Plex Sans Thai.
+  navy `#0F2542` (brand/sidebar/headings/dark buttons), gold `#C9A227` (accent/active nav/
+  baseline marker), app background `#F4F5F7`, card white `#fff` on border `#E3E5EA`,
+  success green `#1F7A4D`, critical/danger red `#B23A3A`, secondary slate-blue `#33507A`
+  (non-critical Gantt bars, forecast lines). Fonts: **IBM Plex Sans Thai** (body/UI) +
+  **Bai Jamjuree** (headings, numeric emphasis) — not Inter.
 - UI copy Thai-first with English technical terms (EVM, SPI, CPI stay English).
 
 ## Non-negotiables
