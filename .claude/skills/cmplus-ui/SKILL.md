@@ -18,6 +18,7 @@ treat the prototype as authoritative for every visual/UX decision (see ADR-0006)
 | `gold` | `#C9A227` | Brand mark, active nav item, EV line, baseline bar, "active/starred" indicators |
 | `bg` | `#F4F5F7` | App/page background |
 | `surface` | `#fff` | Card/table background |
+| `surface-muted` | `#F7F8FA` | DataTable header row background |
 | `border` | `#E3E5EA` | Card/table borders |
 | `border-subtle` | `#F0F1F4` | Row dividers inside tables |
 | `text` | `#1A2433` | Primary text |

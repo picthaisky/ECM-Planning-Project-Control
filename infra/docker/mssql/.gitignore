@@ -1,0 +1,2 @@
+# Real local secrets — never commit. Only .env.mssql.example is tracked.
+.env

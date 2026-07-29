@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <!-- ASP.NET Core packages only. No EF Core package reference here by design - WebApi
+         reaches persistence only through Infrastructure's composition root (ADR-0001). -->
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.10" />
+    <!-- Direct pin (S3-SEC-01 finding M-03): Microsoft.AspNetCore.OpenApi 10.0.10 transitively pulls
+         Microsoft.OpenApi 2.0.0, which carries a High-severity advisory (GHSA-v5pm-xwqc-g5wc: a
+         circular schema reference can crash the process parsing an OpenAPI document) fixed in 2.7.5+
+         for the 2.x line - same direct-pin-overrides-transitive pattern already applied to
+         System.Security.Cryptography.Xml in CMPlus.Infrastructure.csproj. CM+ only ever generates its
+         own OpenAPI document (never parses an untrusted one), and MapOpenApi() is Development-only
+         (Program.cs), so reachability is low - but the vulnerable assembly still ships in the runtime
+         image, and ADR-0010's CI gate requires a clean vulnerable-package scan regardless. -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.11.0" />
+    <!-- JWT Bearer authentication middleware (S2-BE-01) - validates incoming tokens; issuance
+         lives in Infrastructure's IJwtTokenService. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CMPlus.Application\CMPlus.Application.csproj" />
+    <ProjectReference Include="..\CMPlus.Infrastructure\CMPlus.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

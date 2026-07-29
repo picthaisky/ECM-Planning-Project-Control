@@ -1,0 +1,191 @@
+{
+  "source": ".claude/knowledge/domain/payment-retention.md",
+  "family": "Payment-Retention",
+  "precisionNote": "Money decimal(18,2), percent decimal(5,2). Round EACH line separately, half-away-from-zero, then subtract - never compute N_k at full precision and round once (source line 10-14). Symbols: G_k (period gross), R_k (period retention), D_k (period advance recovery), N_k = G_k - R_k - D_k (net payment this period).",
+  "formula": {
+    "grossCumulative": "G_cum_k = M_m * (p_app_k / 100)",
+    "grossPeriod": "G_k = G_cum_k - G_cum_(k-1)",
+    "retention": "R_k = max(0, min((r/100)*G_k, R_max - R_cum_(k-1)));  R_max = (c/100)*C, or infinity if c is null",
+    "advance": "D_k = max(0, min((a/100)*G_k, A - D_cum_(k-1), G_k - R_k))",
+    "netPayment": "N_k = G_k - R_k - D_k"
+  },
+  "fixtures": [
+    {
+      "fixtureId": "P1",
+      "description": "P1 - normal period, Thai config (no retention cap) (payment-retention.md lines 138-143).",
+      "inputs": {
+        "contractValue_C": 485000000.00,
+        "retentionRate_r": 5.00,
+        "retentionCapPercentage_c": null,
+        "advanceRate_a": 10.00,
+        "advanceAmountPaid_A": 48500000.00,
+        "retentionCumulativeBefore_RcumK1": 11900000.00,
+        "advanceRecoveredCumulativeBefore_DcumK1": 23800000.00,
+        "milestoneValue_M": 21600000.00,
+        "priorApprovePct": 0.00,
+        "thisApprovePct_pApp": 100.00
+      },
+      "expected": {
+        "grossPeriod_Gk": 21600000.00,
+        "retention_Rk": 1080000.00,
+        "advanceRecovery_Dk": 2160000.00,
+        "netPayment_Nk": 18360000.00
+      }
+    },
+    {
+      "fixtureId": "P2",
+      "description": "P2 - partial certification, proves period-vs-cumulative deduction (payment-retention.md lines 145-149). Deducting on the cumulative 6,500,000 instead of the period value would over-deduct retention/advance by 200,000/400,000.",
+      "inputs": {
+        "milestoneValue_M": 10000000.00,
+        "priorApprovePct": 40.00,
+        "thisApprovePct_pApp": 65.00,
+        "retentionRate_r": 5.00,
+        "advanceRate_a": 10.00,
+        "cappingBinding": false
+      },
+      "expected": {
+        "grossPeriod_Gk": 2500000.00,
+        "retention_Rk": 125000.00,
+        "advanceRecovery_Dk": 250000.00,
+        "netPayment_Nk": 2125000.00
+      },
+      "regressionWarning": {
+        "cumulativeBasedRetentionOverDeduction": 200000.00,
+        "cumulativeBasedAdvanceOverDeduction": 400000.00,
+        "note": "Verbatim from source: 'Deducting on the cumulative 6,500,000 instead would over-deduct retention/advance by 200,000/400,000.' (payment-retention.md line 149). These are deltas versus the correct period-based Rk/Dk above, as stated in the source; the source does not itself state the resulting wrong Rk/Dk totals, so none are fabricated here."
+      }
+    },
+    {
+      "fixtureId": "P3",
+      "description": "P3 - FIDIC retention cap binds; fails without RetentionCapPercentage (payment-retention.md lines 151-157).",
+      "inputs": {
+        "contractValue_C": 100000000.00,
+        "retentionRate_r": 10.00,
+        "retentionCapPercentage_c": 5.00,
+        "retentionMax_Rmax": 5000000.00,
+        "retentionCumulativeBefore_RcumK1": 4500000.00,
+        "advanceRate_a": 10.00,
+        "advanceAmountPaid_A": 10000000.00,
+        "advanceRecoveredCumulativeBefore_DcumK1": 4500000.00,
+        "grossPeriod_Gk": 8000000.00
+      },
+      "expected": {
+        "uncappedRetention": 800000.00,
+        "retentionHeadroom": 500000.00,
+        "retention_Rk": 500000.00,
+        "advanceRecovery_Dk": 800000.00,
+        "netPayment_Nk": 6700000.00,
+        "withoutCapLogicWronglyComputedNk": 6400000.00,
+        "underpaymentIfCapMissing": 300000.00
+      }
+    },
+    {
+      "fixtureId": "P3b",
+      "description": "P3b - next period after P3, retention cap fully consumed (payment-retention.md lines 159-160).",
+      "inputs": {
+        "grossPeriod_Gk": 5000000.00,
+        "retentionCumulativeAfterP3_Rcum": 5000000.00,
+        "advanceRate_a": 10.00
+      },
+      "expected": {
+        "retention_Rk": 0.00,
+        "advanceRecovery_Dk": 500000.00,
+        "netPayment_Nk": 4500000.00
+      }
+    },
+    {
+      "fixtureId": "P4",
+      "description": "P4 - advance nearly exhausted (payment-retention.md lines 162-165).",
+      "inputs": {
+        "advanceAmountPaid_A": 10000000.00,
+        "advanceRecoveredCumulativeBefore_DcumK1": 9960000.00,
+        "grossPeriod_Gk": 1000000.00,
+        "retentionRate_r": 5.00,
+        "advanceRate_a": 10.00
+      },
+      "expected": {
+        "retention_Rk": 50000.00,
+        "uncappedAdvance": 100000.00,
+        "advanceOutstanding": 40000.00,
+        "advanceRecovery_Dk": 40000.00,
+        "netPayment_Nk": 910000.00
+      }
+    },
+    {
+      "fixtureId": "P5",
+      "description": "P5 - edge: nothing certified this period, p_app_k = p_app_(k-1) or certificate returned (payment-retention.md lines 167-168).",
+      "inputs": {
+        "priorApprovePct": null,
+        "thisApprovePctEqualsPrior": true
+      },
+      "expected": {
+        "grossPeriod_Gk": 0.00,
+        "retention_Rk": 0.00,
+        "advanceRecovery_Dk": 0.00,
+        "netPayment_Nk": 0.00,
+        "rule": "no division anywhere"
+      }
+    },
+    {
+      "fixtureId": "P6",
+      "description": "P6 - ThresholdBanded advance recovery, FIDIC 14.2 (payment-retention.md lines 170-178).",
+      "config": {
+        "contractValue_C": 100000000.00,
+        "advanceAmountPaid_A": 10000000.00,
+        "startThresholdPct_s": 10,
+        "recoveryRatePct_rho": 25,
+        "forcedFullRecoveryPct_e": 90
+      },
+      "expected": {
+        "certificates": [
+          {
+            "certNo": 1,
+            "grossCumulative_Gcum": 8000000.00,
+            "excessOverStartThreshold": 0.00,
+            "targetAdvanceCumulative": 0.00,
+            "advanceRecovery_Dk": 0.00
+          },
+          {
+            "certNo": 2,
+            "grossCumulative_Gcum": 15000000.00,
+            "excessOverStartThreshold": 5000000.00,
+            "targetAdvanceCumulative": 1250000.00,
+            "advanceRecovery_Dk": 1250000.00
+          },
+          {
+            "certNo": 3,
+            "grossCumulative_Gcum": 25000000.00,
+            "excessOverStartThreshold": 15000000.00,
+            "targetAdvanceCumulative": 3750000.00,
+            "advanceRecovery_Dk": 2500000.00
+          },
+          {
+            "certNo": "...(later certificate)",
+            "grossCumulative_Gcum": 50000000.00,
+            "excessOverStartThreshold": 40000000.00,
+            "targetAdvanceCumulative": 10000000.00,
+            "targetEqualsA": true,
+            "note": "Advance fully recovered at this point; source table does not state a per-certificate D_k value for this row, only that the target cumulative reaches A=10,000,000.00. Do not fabricate a D_k number for this specific row."
+          }
+        ]
+      }
+    },
+    {
+      "fixtureId": "P7",
+      "description": "P7 - rounding determinism, the banker's-rounding trap (payment-retention.md lines 180-183). Exists specifically to catch a regression to .NET's default banker's rounding.",
+      "inputs": {
+        "grossPeriod_Gk": 1000000.10,
+        "retentionRate_r": 5.00,
+        "advanceRate_a": 10.00
+      },
+      "expected": {
+        "retentionRawBeforeRounding_Rk": 50000.005,
+        "retention_Rk_halfAwayFromZero": 50000.01,
+        "advanceRecovery_Dk": 100000.01,
+        "netPayment_Nk": 850000.08,
+        "bankersRoundingWrongResult": 850000.09,
+        "roundingMethodRequired": "MidpointRounding.AwayFromZero, applied per line before subtracting"
+      }
+    }
+  ]
+}

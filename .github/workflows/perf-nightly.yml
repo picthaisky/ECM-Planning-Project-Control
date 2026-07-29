@@ -1,0 +1,351 @@
+name: Nightly WBS-tree perf
+
+# S4-DO-01 (docs/10. Sprint 4, devops-engineer row; DoD: "รันทุกคืนบนชุดข้อมูลใหญ่ + เก็บ trend;
+# ถดถอยเกินเกณฑ์ -> แจ้งเตือน"). Companion to S4-QA-01/S4-DB-02's tests/perf/wbs-tree.k6.js +
+# tests/perf/seed-large-project.sql and docs/perf/baseline.md.
+#
+# Deliberately NOT a `pull_request` job (unlike everything in ci.yml): docs/perf/baseline.md
+# documented P95 ranging 68-175ms across 11 real runs of the identical 20-VU/30s load on a
+# shared dev workstation (~18% breach rate on tail latency alone, 0% request failures, root-
+# caused to genuine CPU contention, not a code defect) and explicitly recommended against
+# gating on a single run:
+#   "S4-DO-01 (devops-engineer, nightly perf CI) should run this exact script on a dedicated CI
+#   runner (not a shared dev workstation) and track the trend across nights... Consider
+#   averaging P95 over N repeated k6 runs per nightly job... rather than gating on one 30s run."
+# A per-PR job re-running that same noisy single-run gate would just relocate the false-red/
+# false-green risk onto every PR instead of removing it. This job runs on a schedule (a GitHub-
+# hosted runner is itself a dedicated, single-tenant-for-the-job-duration machine - satisfying
+# "dedicated CI runner" without needing to stand up self-hosted infra) and aggregates N runs into
+# one robust statistic instead.
+#
+# First-run note: a GitHub-hosted runner's CPU allocation differs from both the dev workstation
+# in docs/perf/baseline.md AND from Sprint 16's eventual staging environment (ADR-0010) - the
+# absolute P95 numbers this job produces are its OWN baseline, established the first night it
+# runs, not expected to match either of those other environments (docs/perf/baseline.md section
+# 6 says exactly this about a "dedicated CI runner" measurement).
+
+on:
+  schedule:
+    # 20:00 UTC = 03:00 ICT (Thailand) - deep off-hours, doesn't contend with any daytime dev/CI
+    # activity. Cron is always UTC in GitHub Actions; there is no timezone field.
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Number of k6 runs to aggregate (median-of-N)'
+        required: false
+        default: '10'
+      vus:
+        description: 'Concurrent virtual users per k6 run'
+        required: false
+        default: '20'
+      duration:
+        description: 'Duration of each k6 run'
+        required: false
+        default: '30s'
+      p95_threshold_ms:
+        description: 'Hard P95 target in ms (docs/10 S4-QA-01 DoD)'
+        required: false
+        default: '100'
+      regression_multiplier:
+        description: 'Trend-regression trigger: median P95 > this x rolling baseline'
+        required: false
+        default: '1.25'
+
+# Only one perf run at a time - a second overlapping run racing the first for the same
+# `perf-trend` branch push (see the trend-append step) would risk a lost update. Queue rather
+# than cancel: an in-flight nightly run should finish and record its result, not be discarded.
+concurrency:
+  group: perf-nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  COMPOSE_PROJECT_NAME: cmplus-perf
+  # Ephemeral, job-scoped container credentials - identical reasoning to ci.yml's
+  # `migration-smoke` job: these containers never persist beyond this job (no volume survives
+  # `down -v` in the cleanup step) and never leave the runner's own Docker daemon, so there is
+  # nothing to rotate; using `secrets.*` would only add required repo setup for no security
+  # benefit. Must satisfy SQL Server's own password-complexity policy.
+  MSSQL_SA_PASSWORD: Ch4ngeMe!PerfNightlyCIOnly1
+  MSSQL_APP_DB: CMPlusDb
+  MSSQL_APP_USER: cmplus_app
+  MSSQL_APP_PASSWORD: Ch4ngeMe!PerfNightlyApp1
+  MINIO_ROOT_USER: cmplus_perf_minio
+  MINIO_ROOT_PASSWORD: Ch4ngeMe!PerfNightlyMinio1
+  JWT_SIGNING_KEY: Ch4ngeMe!PerfNightlyJwtSigningKey-32charsplus
+  MSSQL_HOST_PORT: '1433'
+  API_HOST_PORT: '5000'
+
+jobs:
+  perf-nightly:
+    name: Nightly perf (real stack, N=k6 runs, aggregated + trended)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write # only this job needs it, to append/push the `perf-trend` branch
+      issues: write   # only used on a regression, to open/update the alert issue
+    env:
+      N_RUNS: ${{ github.event.inputs.runs || '10' }}
+      VUS: ${{ github.event.inputs.vus || '20' }}
+      DURATION: ${{ github.event.inputs.duration || '30s' }}
+      P95_THRESHOLD_MS: ${{ github.event.inputs.p95_threshold_ms || '100' }}
+      REGRESSION_MULTIPLIER: ${{ github.event.inputs.regression_multiplier || '1.25' }}
+      RUN_TRIGGER: ${{ github.event_name }}
+      RESULTS_DIR: ${{ github.workspace }}/tests/perf/results
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Same cache key convention as ci.yml's `backend`/`migration-smoke` jobs.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      # ---------------------------------------------------------------------------------------
+      # 1. Stand up the real stack (mssql + minio + api - web is not needed, same as
+      #    docs/perf/baseline.md's runbook). A fresh runner has no locally-built images, so
+      #    `--build` is required every run (unlike a dev workstation that already has them).
+      # ---------------------------------------------------------------------------------------
+      - name: Write ephemeral compose .env
+        working-directory: infra/docker
+        run: |
+          set -euo pipefail
+          cat > .env.ci <<EOF
+          ASPNETCORE_ENVIRONMENT=Production
+          API_HOST_PORT=${API_HOST_PORT}
+          JWT_SIGNING_KEY=${JWT_SIGNING_KEY}
+          JWT_ISSUER=CMPlus
+          JWT_AUDIENCE=CMPlusClients
+          JWT_EXPIRY_MINUTES=60
+          MSSQL_PID=Developer
+          MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+          MSSQL_APP_DB=${MSSQL_APP_DB}
+          MSSQL_APP_USER=${MSSQL_APP_USER}
+          MSSQL_APP_PASSWORD=${MSSQL_APP_PASSWORD}
+          MSSQL_HOST_PORT=${MSSQL_HOST_PORT}
+          MINIO_ROOT_USER=${MINIO_ROOT_USER}
+          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+          MINIO_BUCKET=cmplus-files
+          MINIO_API_HOST_PORT=9000
+          MINIO_CONSOLE_HOST_PORT=9001
+          IMAGE_TAG=perf-nightly
+          EOF
+
+      - name: Build and start api + mssql + minio
+        working-directory: infra/docker
+        run: |
+          docker compose -f docker-compose.yml --env-file .env.ci up -d --build mssql minio api
+
+      # `docker compose up -d` returns once containers are *started*, not once the api
+      # container's own HEALTHCHECK (baked into infra/docker/api.Dockerfile, ~20s start-period)
+      # has passed - explicit poll, same pattern as ci.yml's migration-smoke MSSQL wait.
+      - name: Wait for api to become healthy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' cmplus-perf-api-1 2>/dev/null || echo "starting")
+            echo "attempt $i: $status"
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::api container did not become healthy in time"
+          docker logs cmplus-perf-api-1 || true
+          exit 1
+
+      - name: Restore + build backend (needed to run the migration/seed smoke test below)
+        run: |
+          dotnet restore backend/CMPlus.sln
+          dotnet build backend/CMPlus.sln --configuration Release --no-restore
+
+      # ---------------------------------------------------------------------------------------
+      # 2. Apply migrations + seed the S1-DB-03 dev tenant. Reuses
+      #    CMPlus.Integration.Tests.Persistence.MigrationAndSeedSmokeTests - the exact same real
+      #    entry points (Database.MigrateAsync + DevDataSeeder.SeedAsync) ci.yml's own
+      #    `migration-smoke` job and docs/perf/baseline.md's runbook already use, rather than a
+      #    third re-implementation via the `dotnet ef` CLI (which would need its own tool
+      #    install this repo carries no manifest for).
+      # ---------------------------------------------------------------------------------------
+      - name: Apply migrations + seed dev tenant
+        env:
+          CMPLUS_TEST_MSSQL_CONNECTION: "Server=127.0.0.1,${{ env.MSSQL_HOST_PORT }};Database=${{ env.MSSQL_APP_DB }};User Id=${{ env.MSSQL_APP_USER }};Password=${{ env.MSSQL_APP_PASSWORD }};TrustServerCertificate=True;"
+        run: |
+          dotnet test backend/CMPlus.sln --configuration Release --no-build \
+            --filter "FullyQualifiedName~MigrationAndSeedSmokeTests"
+
+      # ---------------------------------------------------------------------------------------
+      # 3. Load the 5,000/10,000/15,000 perf dataset (S4-DB-02). Idempotent + deterministic -
+      #    always produces ProjectId 2193e79c-a4c8-e7a5-0ffe-fb3f581af585 (wbs-tree.k6.js's own
+      #    default), so it is always safe to (re)run fresh on every nightly job.
+      # ---------------------------------------------------------------------------------------
+      - name: Load large perf dataset
+        run: |
+          docker exec -i cmplus-perf-mssql-1 /opt/mssql-tools18/bin/sqlcmd \
+            -S localhost -U sa -P "${MSSQL_SA_PASSWORD}" -C -N -d "${MSSQL_APP_DB}" -b \
+            < tests/perf/seed-large-project.sql
+
+      # ---------------------------------------------------------------------------------------
+      # 4. Run k6 N times (default 10 - the same order of magnitude as docs/perf/baseline.md's
+      #    own 11-run characterization, so this job's statistic is comparable to that baseline,
+      #    not an arbitrarily different sample size). Each run's own k6 threshold can legitimately
+      #    fail on a single noisy run (`|| true`); the aggregation step below, not any individual
+      #    run's exit code, decides the actual verdict - that is the entire point of this job
+      #    existing instead of `wbs-tree.k6.js` running once inside a normal PR gate.
+      # ---------------------------------------------------------------------------------------
+      - name: Run k6 N times against the real API container
+        run: |
+          set -euo pipefail
+          mkdir -p "${RESULTS_DIR}"
+          for i in $(seq 1 "${N_RUNS}"); do
+            echo "=== k6 run ${i}/${N_RUNS} ==="
+            docker run --rm --network "${COMPOSE_PROJECT_NAME}_default" \
+              -v "${GITHUB_WORKSPACE}/tests/perf:/scripts" -w /scripts \
+              -e BASE_URL=http://api:8080 \
+              -e VUS="${VUS}" -e DURATION="${DURATION}" -e P95_THRESHOLD_MS="${P95_THRESHOLD_MS}" \
+              grafana/k6 run /scripts/wbs-tree.k6.js || true
+            cp tests/perf/wbs-tree.result.json "${RESULTS_DIR}/wbs-tree.result.run-${i}.json"
+          done
+
+      # ---------------------------------------------------------------------------------------
+      # 5. Aggregate the N runs (median-of-N P95, per docs/perf/baseline.md's own recommendation)
+      #    and check both the hard 100ms target and a rolling trend baseline. See
+      #    tests/perf/aggregate-and-check.py's own docstring for the full statistic definitions.
+      #    This step's own exit code is NOT the job's pass/fail signal (see the final Gate step
+      #    below) - trend-append/artifact-upload/issue-alert must all still run on a red result.
+      # ---------------------------------------------------------------------------------------
+      - name: Fetch or initialize the perf-trend branch
+        run: |
+          set -euo pipefail
+          git config user.name "cmplus-perf-bot"
+          git config user.email "cmplus-perf-bot@users.noreply.github.com"
+          mkdir -p "${GITHUB_WORKSPACE}/perf-trend-data"
+          if git ls-remote --exit-code --heads origin perf-trend >/dev/null 2>&1; then
+            git clone --branch perf-trend --single-branch --depth 50 \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              perf-trend-data
+          else
+            echo "No perf-trend branch yet - this is expected on the very first run."
+            git clone --depth 1 \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              perf-trend-data
+            (
+              cd perf-trend-data
+              git checkout --orphan perf-trend
+              git rm -rf . >/dev/null 2>&1 || true
+              printf 'date,trigger,commit_sha,n_runs,median_p95_ms,min_p95_ms,max_p95_ms,mean_p95_ms,pass_count,fail_count,rolling_baseline_p95_ms,hard_breach,trend_regression,verdict,run_url\n' > trend.csv
+              git add trend.csv
+              git commit -m "chore(perf): initialize perf-trend branch"
+            )
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Aggregate k6 results + check hard target and trend regression
+        id: aggregate
+        run: |
+          python3 tests/perf/aggregate-and-check.py
+        env:
+          RESULTS_DIR: ${{ env.RESULTS_DIR }}
+          TREND_CSV_PATH: ${{ github.workspace }}/perf-trend-data/trend.csv
+          HARD_THRESHOLD_MS: ${{ env.P95_THRESHOLD_MS }}
+          REGRESSION_MULTIPLIER: ${{ env.REGRESSION_MULTIPLIER }}
+          # RUN_DATE_UTC deliberately left unset - aggregate-and-check.py defaults it to the
+          # current UTC date itself; no need to shell out to `date` just to pass it through.
+          RUN_TRIGGER: ${{ env.RUN_TRIGGER }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTPUT_JSON_PATH: ${{ env.RESULTS_DIR }}/aggregate.json
+          NEW_TREND_ROW_PATH: ${{ github.workspace }}/perf-trend-data/new-trend-row.csv
+
+      # ---------------------------------------------------------------------------------------
+      # 6. Persist the trend ("เก็บ trend" DoD). Appended regardless of PASS/FAIL - a failing
+      #    night's own data point is exactly what future nights' rolling baseline needs to see.
+      #    A dedicated orphan branch (never `main`) so this automated data commit never touches
+      #    anything subject to branch-protection/PR review - it is telemetry, not code.
+      # ---------------------------------------------------------------------------------------
+      - name: Append today's row to the perf-trend branch
+        if: always() && steps.aggregate.outcome == 'success'
+        run: |
+          set -euo pipefail
+          cd perf-trend-data
+          cat new-trend-row.csv >> trend.csv
+          rm -f new-trend-row.csv
+          git add trend.csv
+          git commit -m "perf(nightly): $(date -u +%F) median P95=${{ steps.aggregate.outputs.median_p95_ms }}ms (n=${N_RUNS}, trigger=${RUN_TRIGGER}, verdict=${{ steps.aggregate.outputs.verdict }})"
+          git push origin perf-trend
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload raw + aggregate results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-nightly-results-${{ github.run_id }}
+          path: tests/perf/results/
+          retention-days: 14
+
+      # ---------------------------------------------------------------------------------------
+      # 7. Alert ("ถดถอยเกินเกณฑ์ -> แจ้งเตือน" DoD): a red workflow run alone is easy to miss on a
+      #    schedule nobody is watching, so a regression also opens/updates a tracked GitHub
+      #    issue - searched by title marker rather than a label, so this never depends on a
+      #    label existing in the repo first.
+      # ---------------------------------------------------------------------------------------
+      - name: Open or update the perf-regression alert issue
+        if: always() && steps.aggregate.outcome == 'success' && steps.aggregate.outputs.verdict != 'PASS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TITLE="[perf-nightly] WBS-tree P95 regression (S4-DO-01)"
+          BODY="Verdict: **${{ steps.aggregate.outputs.verdict }}** on $(date -u +%F).
+          Median-of-${N_RUNS} P95: ${{ steps.aggregate.outputs.median_p95_ms }} ms (hard target ${P95_THRESHOLD_MS} ms).
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Trend: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/perf-trend/trend.csv
+          See docs/perf/baseline.md for the documented noise characteristics this job aggregates against."
+
+          existing=$(gh issue list --search "in:title \"${TITLE}\"" --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "${existing}" ] && [ "${existing}" != "null" ]; then
+            gh issue comment "${existing}" --body "${BODY}"
+          else
+            gh issue create --title "${TITLE}" --body "${BODY}"
+          fi
+
+      # ---------------------------------------------------------------------------------------
+      # 8. Final gate - the only step whose exit code determines this job's pass/fail. Runs last
+      #    (after trend/artifacts/alerting) so a regression's evidence is always captured before
+      #    the run goes red, per this project's "no silent failures" pattern (ci.yml's
+      #    `ci-required`/NuGet-scan/gitleaks jobs all follow the same shape).
+      # ---------------------------------------------------------------------------------------
+      - name: Gate - fail the run if today's verdict is not PASS
+        if: always()
+        run: |
+          verdict="${{ steps.aggregate.outputs.verdict }}"
+          if [ -z "${verdict}" ]; then
+            echo "::error::Aggregation step never produced a verdict - treat as an infra failure."
+            exit 1
+          fi
+          if [ "${verdict}" != "PASS" ]; then
+            echo "::error::Nightly WBS-tree perf verdict is ${verdict} - see the job summary and the perf-regression issue."
+            exit 1
+          fi
+          echo "Verdict: PASS"
+
+      - name: Tear down the stack
+        if: always()
+        working-directory: infra/docker
+        run: docker compose -f docker-compose.yml --env-file .env.ci down -v || true

@@ -86,4 +86,10 @@ Users can also trigger this manually with `/learn`.
 
 ## Learned Rules (maintained by knowledge-curator — do not edit by hand)
 
+- When a planning/pipeline task's decisions imply new entities, enums, or field names, do not run
+  `po-analyst` and `domain-expert` in parallel on it: run `domain-expert` first (domain rules
+  constrain schema shape), or if parallel is required, explicitly instruct both to keep schema
+  proposals minimal/directional and leave concrete field naming to `system-architect` — see
+  `.claude/knowledge/lessons/lessons-learned.md` (2026-07-27).
+
 <!-- knowledge-curator appends promoted team-wide rules below this line -->

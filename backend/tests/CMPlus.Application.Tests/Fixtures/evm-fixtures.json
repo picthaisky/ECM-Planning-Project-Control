@@ -1,0 +1,51 @@
+{
+  "source": ".claude/knowledge/domain/evm-formulas.md",
+  "family": "EVM-Core",
+  "precisionNote": "Money uses decimal(18,2); percent uses decimal(5,2); ratios (SPI/CPI/TCPI) keep full decimal precision in intermediates per source line 4, rounding once at display. 'FullPrecision' fields below were computed with .NET System.Decimal arithmetic directly from the raw inputs (28-29 significant digits) so a later xUnit test can assert to whatever decimal places it needs; 'Rounded2dp' fields are the money-precision values stated verbatim in the source markdown. Do not treat the very last 1-2 digits of a FullPrecision value as load-bearing - chained decimal division can differ in the last significant digit depending on operation order without changing the correctly-rounded 2dp result.",
+  "fixtures": [
+    {
+      "fixtureId": "EVM-A",
+      "description": "Fixture A - typical, behind schedule and over budget (evm-formulas.md lines 36-40).",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "sv": -100000.00,
+        "cv": -50000.00,
+        "spi": 0.75,
+        "cpiFullPrecision": 0.8571428571428571428571428571,
+        "cpiSourceText": "0.857142857… (6/7 repeating)",
+        "eacDefaultFormula": "BAC / CPI",
+        "eacDefaultRounded2dp": 1166666.67,
+        "eacDefaultFullPrecision": 1166666.6666666666666666666667,
+        "etcRounded2dp": 816666.67,
+        "etcFullPrecision": 816666.6666666666666666666667,
+        "vacRounded2dp": -166666.67,
+        "vacFullPrecision": -166666.6666666666666666666667,
+        "tcpiFormula": "(BAC - EV) / (BAC - AC) = 700000 / 650000",
+        "tcpiFullPrecision": 1.0769230769230769230769230769,
+        "tcpiSourceText": "1.0769…"
+      }
+    },
+    {
+      "fixtureId": "EVM-B",
+      "description": "Fixture B - edge: not started (evm-formulas.md line 42-43).",
+      "inputs": { "pv": 0.00, "ev": 0.00, "ac": 0.00 },
+      "expected": {
+        "sv": 0.00,
+        "cv": 0.00,
+        "spi": null,
+        "cpi": null,
+        "eac": null,
+        "displayWhenNull": "—"
+      }
+    },
+    {
+      "fixtureId": "EVM-C",
+      "description": "Fixture C - edge: zero-budget activity (evm-formulas.md line 45-46).",
+      "inputs": { "activityBudgetCost": 0.00, "activityProgressPercentage": 50.00 },
+      "expected": {
+        "evContribution": 0.00,
+        "rule": "no division, no NaN"
+      }
+    }
+  ]
+}

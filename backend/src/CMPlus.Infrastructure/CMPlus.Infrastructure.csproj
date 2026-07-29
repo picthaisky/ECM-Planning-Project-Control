@@ -1,0 +1,38 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <!-- EF Core 10 + MSSQL live in Infrastructure only (ADR-0001). No entity/DbContext code yet -
+         this is Phase 0 scaffolding; the DbContext lands in Sprint 1. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- JWT issuance (S2-BE-01). Password hashing deliberately uses only the BCL's
+         Rfc2898DeriveBytes (PBKDF2) - no extra package - since Microsoft.Extensions.Identity.Core
+         is not available in this solution's restore sources. -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
+    <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
+    <!-- S3-BE-03: Excel import/export templates. EPPlus 8's license (Polyform Noncommercial /
+         commercial) must be set at runtime via ExcelPackage.License - see ExcelPackageLicense.cs.
+         CM+ is a commercial product: a real commercial license key must replace the NonCommercial
+         default (Import:Excel:LicenseType/LicenseKeyOrName in configuration) before production use -
+         flagged the same way the golden-file provenance gap is flagged, not silently shipped. -->
+    <PackageReference Include="EPPlus" Version="8.5.4" />
+    <!-- Direct pin (S3-QA-02/security follow-up): EPPlus 8.5.4 transitively pulls
+         System.Security.Cryptography.Xml 10.0.7, which carries 5 High-severity advisories fixed in
+         10.0.10 - the same .NET 10 servicing line every other Microsoft.* package in this solution
+         already tracks. CM+'s own Excel usage never touches OOXML digital-signature verification
+         (the feature this package backs), so the exploitable surface was likely unreachable in
+         practice either way, but pinning the fixed version costs nothing and closes the CI
+         vulnerability-scan finding rather than requiring a tracked exception for it. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CMPlus.Application\CMPlus.Application.csproj" />
+    <ProjectReference Include="..\CMPlus.Domain\CMPlus.Domain.csproj" />
+  </ItemGroup>
+
+</Project>

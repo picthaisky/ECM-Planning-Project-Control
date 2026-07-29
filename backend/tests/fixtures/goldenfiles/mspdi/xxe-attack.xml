@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Project [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Tasks>
+    <Task>
+      <UID>0</UID>
+      <ID>0</ID>
+      <Name>&xxe;</Name>
+      <OutlineLevel>0</OutlineLevel>
+      <Summary>1</Summary>
+    </Task>
+  </Tasks>
+</Project>

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Tasks>
+    <Task>
+      <UID>0</UID>
+      <ID>0</ID>
+      <Name>Sample MSPDI Project</Name>
+      <OutlineLevel>0</OutlineLevel>
+      <Summary>1</Summary>
+    </Task>
+    <Task>
+      <UID>1</UID>
+      <ID>1</ID>
+      <Name>Civil Works</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Summary>1</Summary>
+      <WBS>1</WBS>
+    </Task>
+    <Task>
+      <UID>2</UID>
+      <ID>2</ID>
+      <Name>Excavation</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.1</WBS>
+      <Start>2026-02-02T08:00:00</Start>
+      <Finish>2026-02-06T17:00:00</Finish>
+      <Duration>PT40H0M0S</Duration>
+      <Cost>500000</Cost>
+    </Task>
+    <Task>
+      <UID>3</UID>
+      <ID>3</ID>
+      <Name>Foundation</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.2</WBS>
+      <Start>2026-02-09T08:00:00</Start>
+      <Finish>2026-02-13T17:00:00</Finish>
+      <Duration>PT40H0M0S</Duration>
+      <Cost>750000</Cost>
+      <PredecessorLink>
+        <PredecessorUID>2</PredecessorUID>
+        <Type>1</Type>
+      </PredecessorLink>
+    </Task>
+    <Task>
+      <UID>4</UID>
+      <ID>4</ID>
+      <Name>MEP Works</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Summary>1</Summary>
+      <WBS>2</WBS>
+    </Task>
+    <Task>
+      <UID>5</UID>
+      <ID>5</ID>
+      <Name>Electrical Rough-in</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>2.1</WBS>
+      <Start>2026-02-16T08:00:00</Start>
+      <Finish>2026-02-18T17:00:00</Finish>
+      <Duration>PT24H0M0S</Duration>
+      <Cost>300000</Cost>
+      <PredecessorLink>
+        <PredecessorUID>3</PredecessorUID>
+        <Type>3</Type>
+        <LinkLag>PT8H0M0S</LinkLag>
+      </PredecessorLink>
+    </Task>
+  </Tasks>
+</Project>

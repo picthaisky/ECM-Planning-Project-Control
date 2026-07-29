@@ -1,0 +1,97 @@
+{
+  "source": ".claude/knowledge/domain/cpm-method.md",
+  "family": "CPM",
+  "note": "P0-QA-01 extraction. Consumed by Sprint 5 CPM engine tests. Values transcribed verbatim from cpm-method.md; do not alter without updating the source doc.",
+  "fixtures": [
+    {
+      "fixtureId": "CPM-NETWORK-1",
+      "description": "Worked fixture (cpm-method.md lines 30-35): two parallel converging paths, all FS relations lag 0, project start day 0.",
+      "inputs": {
+        "projectStartDay": 0,
+        "activities": [
+          { "id": "A", "durationDays": 5 },
+          { "id": "B", "durationDays": 3 },
+          { "id": "C", "durationDays": 6 },
+          { "id": "D", "durationDays": 4 }
+        ],
+        "relations": [
+          { "predecessorId": "A", "successorId": "B", "type": "FS", "lagDays": 0 },
+          { "predecessorId": "A", "successorId": "C", "type": "FS", "lagDays": 0 },
+          { "predecessorId": "B", "successorId": "D", "type": "FS", "lagDays": 0 },
+          { "predecessorId": "C", "successorId": "D", "type": "FS", "lagDays": 0 }
+        ]
+      },
+      "expected": {
+        "activities": [
+          { "id": "A", "es": 0, "ef": 5, "ls": 0, "lf": 5, "tf": 0, "ff": 0, "isCritical": true },
+          { "id": "B", "es": 5, "ef": 8, "ls": 8, "lf": 11, "tf": 3, "ff": 3, "isCritical": false },
+          { "id": "C", "es": 5, "ef": 11, "ls": 5, "lf": 11, "tf": 0, "ff": 0, "isCritical": true },
+          { "id": "D", "es": 11, "ef": 15, "ls": 11, "lf": 15, "tf": 0, "ff": 0, "isCritical": true }
+        ],
+        "criticalPath": ["A", "C", "D"],
+        "projectDurationDays": 15,
+        "ffBNote": "FF_B = ES_D - EF_B = 11 - 8 = 3 (source line 34, given verbatim)."
+      }
+    },
+    {
+      "fixtureId": "CPM-EDGE-CYCLE",
+      "description": "Cycle A->B->A must be rejected during graph validation with the offending relation chain identified, not a stack overflow (cpm-method.md line 7 algorithm step 1, and line 36 mandatory edge fixture list).",
+      "inputs": {
+        "activities": [
+          { "id": "A", "durationDays": 5 },
+          { "id": "B", "durationDays": 3 }
+        ],
+        "relations": [
+          { "predecessorId": "A", "successorId": "B", "type": "FS", "lagDays": 0 },
+          { "predecessorId": "B", "successorId": "A", "type": "FS", "lagDays": 0 }
+        ]
+      },
+      "expected": {
+        "result": "rejected",
+        "reasonNote": "Source: 'a cycle -> reject with the offending relation chain' (line 7). No numeric ES/EF is applicable to a rejected graph; only the reject behaviour is specified."
+      }
+    },
+    {
+      "fixtureId": "CPM-EDGE-SS-LAG",
+      "description": "SS relation with lag 2 - named as a mandatory edge case in cpm-method.md line 36 ('Edge fixtures to always include: ... SS with lag 2').",
+      "inputs": {
+        "relationType": "SS",
+        "lagDays": 2
+      },
+      "expected": null,
+      "gap": "The source lists this as a required test case by name only; it does not provide a worked network or concrete ES/EF/LS/LF/TF numbers for an SS-lag-2 relation. Do NOT fabricate expected values here - obtain a worked example from domain-expert before authoring the Sprint 5 xUnit theory for this case. General SS constraint rule is given at line 10: 'SS: ES_p + L'."
+    },
+    {
+      "fixtureId": "CPM-EDGE-FF-LAG",
+      "description": "FF relation with lag 1 - named as a mandatory edge case in cpm-method.md line 36 ('Edge fixtures to always include: ... FF with lag 1').",
+      "inputs": {
+        "relationType": "FF",
+        "lagDays": 1
+      },
+      "expected": null,
+      "gap": "Same situation as CPM-EDGE-SS-LAG: source names the required case only, with no worked network or numbers. General FF constraint rule is given at line 10-11: 'FF: FF constraint applies to finish (EF_i >= EF_p + L)'. Needs a domain-expert worked example before Sprint 5."
+    },
+    {
+      "fixtureId": "CPM-EDGE-ISOLATED-ACTIVITY",
+      "description": "Isolated activity with no predecessor/successor relations (cpm-method.md line 36-37 mandatory edge case; general rule at line 20).",
+      "inputs": {
+        "activity": { "id": "ISO", "durationDays": 4 },
+        "relations": []
+      },
+      "expected": null,
+      "gap": "Source states the rule only qualitatively: 'Activities with no predecessor start at project start; no successor -> constrain by project finish' (line 20). No standalone worked numeric example is given - concrete ES/EF/TF for an isolated activity depend on the surrounding project's finish date, which the source does not define in isolation. Needs a concrete network from domain-expert."
+    },
+    {
+      "fixtureId": "CPM-EDGE-DUPLICATE-RELATION",
+      "description": "Duplicate relations between the same activity pair (cpm-method.md line 36-37 mandatory edge case).",
+      "inputs": {
+        "relations": [
+          { "predecessorId": "A", "successorId": "B", "type": "FS", "lagDays": 0 },
+          { "predecessorId": "A", "successorId": "B", "type": "FS", "lagDays": 0 }
+        ]
+      },
+      "expected": null,
+      "gap": "Source explicitly defers the resolution rule to an ADR without naming it: 'duplicate relations between same pair (reject or dedupe per ADR)' (line 37). Checked .claude/knowledge/architecture/decisions.md - no ADR currently addresses duplicate ActivityRelation rows. This is an open gap; flag to system-architect/domain-expert before Sprint 5, do not assume reject-vs-dedupe."
+    }
+  ]
+}
