@@ -1,0 +1,39 @@
+# Repo-root .dockerignore - applies to every image built with this repo as context
+# (infra/docker/api.Dockerfile, infra/docker/web.Dockerfile, infra/docker/mssql/Dockerfile).
+# Keep build context small and make sure nothing secret or generated ever reaches a layer.
+
+# --- VCS / editor / OS noise ---
+.git/
+.history/
+.vs/
+.idea/
+.DS_Store
+*.swp
+
+# --- .NET build output (rebuilt fresh inside the image; stale host artifacts must never
+#     leak into a container - different OS/arch, and Debug config may embed dev settings) ---
+**/bin/
+**/obj/
+**/TestResults/
+
+# --- Node / frontend build output (rebuilt fresh inside the image) ---
+**/node_modules/
+web/dist/
+web/dist-ssr/
+*.local
+
+# --- Secrets: never bake credentials into a layer. Only *.example templates are allowed in. ---
+**/.env
+**/.env.*
+!**/.env.example
+**/*.pfx
+**/*.pem
+**/*.key
+**/appsettings.*.local.json
+**/secrets.json
+
+# --- Not needed for either image build; trims context transfer time ---
+backend/tests/
+docs/
+.claude/
+*.md

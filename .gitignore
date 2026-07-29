@@ -1,0 +1,35 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.userosscache
+*.sln.docstates
+
+# Test results
+TestResults/
+[Cc]overage*.xml
+[Cc]overage*.json
+
+# EF Core
+*.efmigrationslock.json
+
+# Environment files - real secrets live only in a local, never-committed .env
+# (see infra/docker/.env.example, infra/docker/mssql/.env.mssql.example). Matches ".env" and
+# any ".env.<suffix>" variant (e.g. web/.env.production, web/.env.development - Vite reads
+# these) at any depth, while explicitly un-ignoring ".env.example" / ".env.*.example" style
+# templates so they stay trackable. P0-SEC-01 (security-auditor) found the previous bare
+# ".env"-only rule missed the ".env.production"/".env.development" shape; this replaces it.
+# CI secret-scanning (gitleaks, .gitleaks.toml) is defense-in-depth on top of this.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor local-history snapshots (e.g. VS Code "Local History" extension) - can capture
+# secrets that were briefly pasted into a file and later removed; never worth tracking.
+.history/

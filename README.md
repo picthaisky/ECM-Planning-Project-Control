@@ -6,6 +6,37 @@ Gantt/CPM scheduling, S-Curve, Earned Value Management (EVM), Cash Flow forecast
 Certificates, Variation Orders, Weather Log (EOT evidence), Photo Progress, Man/Equipment
 tracking, and Baseline comparison.
 
+## Repository Layout
+
+The repository is organized by responsibility so backend, frontend, infrastructure, tests, and
+documentation stay separate and easy to evolve.
+
+```text
+.
+├── src/
+│   ├── CMPlus.Domain/         # Pure domain model: entities, value objects, enums, rules
+│   ├── CMPlus.Application/    # Use cases, CQRS handlers, abstractions, validators
+│   ├── CMPlus.Infrastructure/ # EF Core, persistence, external integrations, storage
+│   └── CMPlus.WebApi/         # API host, middleware, DI, controllers, auth
+├── web/                       # React 19 + TypeScript frontend
+│   ├── src/features/          # Module-based UI screens and feature slices
+│   └── public/                # Static assets and PWA files
+├── infra/                     # Docker, local environment, and future IaC/deployment assets
+├── tests/                     # Unit, architecture, and integration test projects
+├── docs/                      # Product, architecture, design, and planning documents
+└── .claude/                   # AI team constitution, skills, and shared knowledge base
+```
+
+Ownership rules:
+
+- Backend business logic lives in `backend/src/CMPlus.Domain` and `backend/src/CMPlus.Application`.
+- Persistence and external system access live in `backend/src/CMPlus.Infrastructure`.
+- HTTP composition and API surface live in `backend/src/CMPlus.WebApi`.
+- UI implementation lives in `web/` and should not mirror server state into local UI stores.
+- Infra code and deployment helpers stay under `infra/`.
+- Cross-cutting verification belongs in `tests/`.
+- Product and architecture decisions belong in `docs/` and `.claude/knowledge/`.
+
 ## Stack
 
 - **Backend:** C# .NET 10, EF Core 10, Web API, Clean Architecture + DDD, CQRS (MediatR),

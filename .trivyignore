@@ -1,0 +1,12 @@
+# S1-DO-01 (.github/workflows/ci.yml `images` job): exceptions to the container image CVE
+# gate. Keep this list narrow, dated, and tied to a specific CVE ID - it is a security
+# exception log, not a place to silence findings quietly. Any CVE not listed here still
+# fails the build.
+#
+# CVE-2026-49451 (Microsoft.OpenApi 2.0.0, GHSA-v5pm-xwqc-g5wc): the SAME advisory already
+# carved out in the `backend` job's NuGet vulnerability scan step (NU1903 at restore time).
+# It reappears here because the API image's published deps.json still lists the package -
+# this is the identical known Phase 0 finding surfacing through a second tool, not a new one.
+# Remove this line once Microsoft.OpenApi ships a fixed 2.x release, or CMPlus.WebApi moves
+# off the vulnerable transitive dependency.
+CVE-2026-49451

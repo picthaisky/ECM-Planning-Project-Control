@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project xmlns="http://schemas.microsoft.com/project">
+  <Tasks>
+    <Task>
+      <UID>0</UID>
+      <ID>0</ID>
+      <Name>Sample MSPDI Project</Name>
+      <OutlineLevel>0</OutlineLevel>
+      <Summary>1</Summary>
+    </Task>
+    <Task>
+      <UID>1</UID>
+      <ID>1</ID>
+      <Name>General Works</Name>
+      <OutlineLevel>1</OutlineLevel>
+      <Summary>1</Summary>
+      <WBS>1</WBS>
+    </Task>
+    <Task>
+      <UID>2</UID>
+      <ID>2</ID>
+      <Name>Task One</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.1</WBS>
+      <Start>2026-03-02T08:00:00</Start>
+      <Finish>2026-03-03T17:00:00</Finish>
+      <Duration>PT16H0M0S</Duration>
+      <Cost>100000</Cost>
+    </Task>
+    <Task>
+      <UID>3</UID>
+      <ID>3</ID>
+      <Name>Task Two</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.2</WBS>
+      <Start>2026-03-04T08:00:00</Start>
+      <Finish>2026-03-04T17:00:00</Finish>
+      <Duration>PT8H0M0S</Duration>
+      <Cost>200000</Cost>
+      <PredecessorLink>
+        <PredecessorUID>2</PredecessorUID>
+        <Type>1</Type>
+      </PredecessorLink>
+    </Task>
+    <Task>
+      <UID>4</UID>
+      <ID>4</ID>
+      <Name>Task Three</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.3</WBS>
+      <Start>2026-03-05T08:00:00</Start>
+      <Finish>2026-03-05T17:00:00</Finish>
+      <Duration>PT8H0M0S</Duration>
+      <Cost>300000</Cost>
+      <PredecessorLink>
+        <PredecessorUID>3</PredecessorUID>
+        <Type>3</Type>
+        <LinkLag>PT8H0M0S</LinkLag>
+      </PredecessorLink>
+    </Task>
+    <Task>
+      <UID>5</UID>
+      <ID>5</ID>
+      <Name>Task Four</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.4</WBS>
+      <Start>2026-03-06T08:00:00</Start>
+      <Finish>2026-03-06T17:00:00</Finish>
+      <Duration>PT8H0M0S</Duration>
+      <Cost>400000</Cost>
+      <PredecessorLink>
+        <PredecessorUID>4</PredecessorUID>
+        <Type>0</Type>
+        <LinkLag>PT16H0M0S</LinkLag>
+      </PredecessorLink>
+    </Task>
+    <Task>
+      <UID>6</UID>
+      <ID>6</ID>
+      <Name>Task Five</Name>
+      <OutlineLevel>2</OutlineLevel>
+      <Summary>0</Summary>
+      <WBS>1.5</WBS>
+      <Start>2026-03-09T08:00:00</Start>
+      <Finish>2026-03-09T17:00:00</Finish>
+      <Duration>PT8H0M0S</Duration>
+      <Cost>500000</Cost>
+      <PredecessorLink>
+        <PredecessorUID>5</PredecessorUID>
+        <Type>2</Type>
+        <LinkLag>PT24H0M0S</LinkLag>
+      </PredecessorLink>
+    </Task>
+  </Tasks>
+</Project>

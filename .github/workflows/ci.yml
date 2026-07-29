@@ -1,0 +1,540 @@
+name: CI
+
+# P0-DO-03 (docs/10. Phase 0, §5): minimal PR gate for both stacks - restore/build/test the
+# .NET solution, build/lint/test the frontend. The `secret-scan` job below was added by
+# security-auditor (P0-SEC-01) and is wired into the `ci-required` gate, so branch protection
+# stays a single check.
+#
+# S1-DO-01 (docs/10. Sprint 1, §6; ADR-0010(b)): matured into build -> test -> lint ->
+# security scan -> push image. Added on top of the above without touching its jobs:
+#   - a NuGet vulnerable-package step in `backend` and an `npm audit` step in `frontend`
+#     (dependency scanning belongs next to the restore/build that produced the graph);
+#   - the `images` job - builds both Dockerfiles, scans them with Trivy, and (push-to-main
+#     only) publishes to ghcr.io tagged by commit SHA. GHCR is used specifically because it
+#     needs no cloud-provider credentials, keeping this consistent with ADR-0010's deferred
+#     AWS-vs-Azure gate (Sprint 16B) - a registry tied to either cloud would prejudge it.
+# `images` is wired into `ci-required` the same way `secret-scan` was.
+#
+# S1-QA-03 (docs/10. Sprint 1, §6): added the `migration-smoke` job - builds the
+# infra/docker/mssql/ image, waits for it to become healthy, then runs
+# CMPlus.Integration.Tests.Persistence.MigrationAndSeedSmokeTests against it, which applies
+# the Sprint 1 EF Core migration and the dev seed (twice, to prove idempotency) to a real SQL
+# Server. Also wired into `ci-required`.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    # Image publish only happens for this event (see the `images` job) - a PR from a fork
+    # never has registry write access, and build-and-scan-without-push is sufficient PR
+    # validation. `workflow_dispatch` below still allows a manual full run against any ref.
+    branches: [main]
+  workflow_dispatch: {}
+
+# Cancel superseded runs on the same PR so CI minutes aren't wasted on stale pushes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  NODE_VERSION: '22'
+
+jobs:
+  backend:
+    name: Backend (.NET) - build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Solution moved to backend/ post-Phase-0 to sit alongside web/ and infra/ as a
+        # proper top-level split; every dotnet command below is relative to that folder.
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # NuGet packages are keyed on every csproj so an added/bumped dependency invalidates
+      # the cache; restore is otherwise the slowest step on a cold runner. hashFiles() is
+      # always relative to GITHUB_WORKSPACE regardless of the working-directory default above,
+      # so the pattern doesn't need a backend/ prefix to still match every csproj.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore CMPlus.sln
+
+      # Fail fast: a build error stops here rather than proceeding to test with a stale binary.
+      - name: Build
+        run: dotnet build CMPlus.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test CMPlus.sln --configuration Release --no-build --logger "trx" --results-directory ./TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          # actions/upload-artifact's `path` is resolved from GITHUB_WORKSPACE, not the job's
+          # `defaults.run.working-directory` (that default only applies to `run:` steps) - needs
+          # the explicit backend/ prefix that the `run:` steps above don't.
+          path: backend/TestResults
+          retention-days: 7
+
+      # S1-DO-01: `dotnet list package --vulnerable` walks the resolved graph (incl.
+      # transitive packages) against the NuGet advisory feed. GHSA-v5pm-xwqc-g5wc
+      # (Microsoft.OpenApi 2.0.0, the NU1903 warning every restore already prints) is a known
+      # advisory triaged in Phase 0 with no fixed version yet for the 2.x line the WebApi
+      # depends on - allow-listed by advisory URL below so it doesn't block every PR. ANY
+      # OTHER high/critical advisory still fails the build. `jq` is preinstalled on
+      # GitHub-hosted ubuntu runners; verified locally via the pinned ghcr.io/jqlang/jq image.
+      #
+      # To accept a new advisory: add its advisory URL to ACCEPTED_ADVISORIES below in a PR
+      # that states why (upstream has no fix, risk accepted, tracking issue link) - this list
+      # is a security exception log, not a place to silence findings quietly.
+      - name: Dependency vulnerability scan (NuGet)
+        run: |
+          set -euo pipefail
+          dotnet list CMPlus.sln package --vulnerable --include-transitive --format json --output-version 1 \
+            > "${RUNNER_TEMP}/nuget-vulnerable.json"
+
+          ACCEPTED_ADVISORIES="https://github.com/advisories/GHSA-v5pm-xwqc-g5wc"
+
+          {
+            echo "### NuGet vulnerability scan"
+            echo
+            echo "| Project | Package | Version | Severity | Advisory | Status |"
+            echo "| --- | --- | --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          found_new=0
+          while IFS=$'\t' read -r proj pkg ver sev url; do
+            [ -z "$proj" ] && continue
+            project_name=$(basename "$proj")
+            status="informational (< high)"
+            if [[ "$sev" =~ ^(High|Critical)$ ]]; then
+              if [ "$url" = "$ACCEPTED_ADVISORIES" ]; then
+                status="accepted (Phase 0, no fix yet)"
+              else
+                status="**BLOCKING**"
+                found_new=1
+              fi
+            fi
+            echo "| $project_name | $pkg | $ver | $sev | $url | $status |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(jq -r '
+              .projects[] as $p
+              | ($p.frameworks // [])[] as $f
+              | (($f.topLevelPackages // []) + ($f.transitivePackages // []))[] as $pkg
+              | $pkg.vulnerabilities[] as $v
+              | [$p.path, $pkg.id, $pkg.resolvedVersion, $v.severity, $v.advisoryurl] | @tsv
+            ' "${RUNNER_TEMP}/nuget-vulnerable.json")
+
+          if [ "$found_new" = "1" ]; then
+            echo "::error::New high/critical NuGet advisory found that is not in the accepted list. See the job summary."
+            exit 1
+          fi
+          echo "No new high/critical NuGet advisories (only the accepted $ACCEPTED_ADVISORIES, if present)."
+
+  frontend:
+    name: Frontend (web) - build, lint & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # npm ci (not install): reproducible from package-lock.json, fails if the lockfile
+      # is out of sync with package.json instead of silently drifting.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck + lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm run test
+
+      # S1-DO-01: same accept-list philosophy as the NuGet step in `backend` - fail on any
+      # high/critical advisory not explicitly accepted below. ACCEPTED_ADVISORIES starts empty
+      # because the frontend has none today (verified locally: `npm audit` is clean); add a
+      # GHSA URL here only via a PR that records why it's accepted.
+      - name: Dependency vulnerability scan (npm audit)
+        run: |
+          set -euo pipefail
+          npm audit --json > "${RUNNER_TEMP}/npm-audit.json" || true
+
+          ACCEPTED_ADVISORIES=()
+
+          {
+            echo "### npm audit"
+            echo
+            echo "| Package | Severity | Advisory | Status |"
+            echo "| --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          found_new=0
+          while IFS=$'\t' read -r pkg sev url; do
+            [ -z "$pkg" ] && continue
+            accepted=0
+            for a in "${ACCEPTED_ADVISORIES[@]}"; do
+              [ "$a" = "$url" ] && accepted=1
+            done
+            if [ "$accepted" = "1" ]; then
+              status="accepted"
+            else
+              status="**BLOCKING**"
+              found_new=1
+            fi
+            echo "| $pkg | $sev | $url | $status |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(jq -r '
+              (.vulnerabilities // {}) | to_entries[] as $e
+              | $e.value.via[]?
+              | select(type == "object")
+              | select(.severity == "high" or .severity == "critical")
+              | [$e.key, .severity, .url] | @tsv
+            ' "${RUNNER_TEMP}/npm-audit.json")
+
+          if [ "$found_new" = "0" ]; then
+            echo "No high/critical npm advisories outstanding." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if [ "$found_new" = "1" ]; then
+            echo "::error::New high/critical npm advisory found that is not in the accepted list. See the job summary."
+            exit 1
+          fi
+
+  # S1-QA-03 (docs/10. Sprint 1, §6; ADR-0009/US-1.3): proves the Sprint 1 migration and dev
+  # seed actually work against a real SQL Server, not just EF Core InMemory (every other test
+  # in CMPlus.Integration.Tests deliberately uses InMemory - see TestDbContextFactory's
+  # remarks). Builds `infra/docker/mssql/Dockerfile` (the same image database-engineer/
+  # backend-developer use locally) rather than a `services:` block on the bare upstream image,
+  # so this job also smoke-tests our own entrypoint.sh/init scripts (app database +
+  # least-privilege `cmplus_app` login), not just SQL Server itself. Waits on `backend` so a
+  # doomed build doesn't also spend minutes standing up a database - "fail fast" per CLAUDE.md.
+  #
+  # Verified locally end-to-end before this job was written (see qa-engineer's Sprint 1
+  # report): built this exact image, started it with this exact `docker run` invocation
+  # (including the inline --health-cmd, which needed verifying separately from
+  # docker-compose's healthcheck: block - they are not interchangeable syntax), waited on the
+  # health status this job polls below, then ran the migration+seed test filter against it
+  # against both a freshly-created database AND the actual `artifacts/migrations/initial.sql`
+  # export - all green.
+  migration-smoke:
+    name: Migration smoke test (MSSQL container + migration + seed)
+    needs: [backend]
+    runs-on: ubuntu-latest
+    env:
+      # Ephemeral, job-scoped container credentials - not secrets. The container never
+      # persists (no volume) and never exists outside this job's lifetime, so there is nothing
+      # to rotate; using `secrets.*` here would only add required repo setup for no security
+      # benefit (same reasoning already documented for the placeholder values in
+      # infra/docker/mssql/.env.mssql.example). Must satisfy SQL Server's own password
+      # complexity policy (>= 8 chars, 3 of upper/lower/digit/symbol).
+      MSSQL_SA_PASSWORD: Ch4ngeMe!CIOnly1
+      MSSQL_APP_DB: CMPlusDb
+      MSSQL_APP_USER: cmplus_app
+      MSSQL_APP_PASSWORD: Ch4ngeMe!CIApp1
+      # Read by CMPlus.Integration.Tests.Persistence.MigrationAndSeedSmokeTests (S1-QA-03) -
+      # that test soft-skips everywhere this variable is unset, so it only ever actually runs
+      # here.
+      CMPLUS_TEST_MSSQL_CONNECTION: "Server=localhost,1433;Database=CMPlusDb;User Id=cmplus_app;Password=Ch4ngeMe!CIApp1;TrustServerCertificate=True;"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Same cache key as the `backend` job (see its comment) - this job restores the same
+      # solution, so it benefits from the same warm cache instead of needing its own.
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Build MSSQL image
+        run: docker build -t cmplus/mssql:ci -f infra/docker/mssql/Dockerfile infra/docker/mssql
+
+      # Plain `docker run`, not `docker compose`, so this job doesn't need a second file
+      # checked out/maintained in parallel with docker-compose.mssql.yml - the --health-cmd/
+      # --health-interval/etc flags below are the exact same values as that compose file's
+      # `healthcheck:` block, just expressed as CLI flags (confirmed these are NOT
+      # interchangeable syntax - a YAML healthcheck: block is not equivalent to `--health-cmd`
+      # string-escaping, verified locally).
+      - name: Start MSSQL container
+        run: |
+          docker run -d --name cmplus-mssql-ci \
+            -e ACCEPT_EULA=Y \
+            -e MSSQL_PID=Developer \
+            -e MSSQL_SA_PASSWORD="${MSSQL_SA_PASSWORD}" \
+            -e MSSQL_APP_DB="${MSSQL_APP_DB}" \
+            -e MSSQL_APP_USER="${MSSQL_APP_USER}" \
+            -e MSSQL_APP_PASSWORD="${MSSQL_APP_PASSWORD}" \
+            -p 1433:1433 \
+            --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"${MSSQL_SA_PASSWORD}\" -C -N -Q \"SELECT 1\" || exit 1" \
+            --health-interval=10s --health-timeout=5s --health-retries=10 --health-start-period=30s \
+            cmplus/mssql:ci
+
+      - name: Wait for MSSQL to become healthy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' cmplus-mssql-ci 2>/dev/null || echo "starting")
+            echo "attempt $i: $status"
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::MSSQL container did not become healthy in time"
+          docker logs cmplus-mssql-ci
+          exit 1
+
+      - name: Restore
+        run: dotnet restore backend/CMPlus.sln
+
+      - name: Build
+        run: dotnet build backend/CMPlus.sln --configuration Release --no-restore
+
+      # US-1.3/S1-DB-01 DoD ("dotnet ef database update on an empty DB succeeds with no manual
+      # intervention") and S1-DB-03 DoD ("seed creates 2 tenants... reruns idempotently"),
+      # exercised for real against the container above - not mocked. Applies the Sprint 1
+      # migration via CmPlusDbContext.Database.MigrateAsync() (the code-level equivalent of
+      # `dotnet ef database update`) to the brand-new `CMPlusDb` database, then runs
+      # DevDataSeeder.SeedAsync twice to prove idempotency. See
+      # CMPlus.Integration.Tests.Persistence.MigrationAndSeedSmokeTests for the full
+      # assertions (2 tenants/14 users/2 projects on the first pass, 0/0/0 on the second).
+      - name: Migration + seed smoke test
+        run: dotnet test backend/CMPlus.sln --configuration Release --no-build --filter "FullyQualifiedName~MigrationAndSeedSmokeTests" --logger "trx" --results-directory ./TestResults-migration-smoke
+
+      - name: Upload migration smoke test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: migration-smoke-test-results
+          path: TestResults-migration-smoke
+          retention-days: 7
+
+      - name: Stop MSSQL container
+        if: always()
+        run: docker rm -f cmplus-mssql-ci || true
+
+  # S1-DO-01 (docs/10. Sprint 1, §6; ADR-0010(b)): build both images, scan for OS/package
+  # CVEs, and (push-to-main only) publish to GHCR tagged by commit SHA. Waits on backend/
+  # frontend so a doomed PR doesn't also spend minutes building and scanning images - "fail
+  # fast" per CLAUDE.md.
+  images:
+    name: Container image (${{ matrix.name }}) - build, scan, push
+    needs: [backend, frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Only exercised on the conditional push step below (push-to-main); a pull_request
+      # from a fork gets a read-only GITHUB_TOKEN regardless of what's declared here, and
+      # same-repo PR runs never reach the `if: github.event_name == 'push'` push step either.
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: infra/docker/api.Dockerfile
+          - name: web
+            dockerfile: infra/docker/web.Dockerfile
+    steps:
+      - uses: actions/checkout@v5
+
+      # GHCR requires an all-lowercase repository path and GitHub Actions expressions have
+      # no built-in case-folding function, so `github.repository_owner` (usually already
+      # lowercase) is defensively lowercased here rather than assumed.
+      - name: Compute image reference
+        id: image
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "ref=ghcr.io/${owner}/cmplus/${{ matrix.name }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      # Build context is the repo root, same as local `docker build` (see the Dockerfile
+      # headers) and infra/docker/docker-compose.yml.
+      - name: Build image
+        run: docker build -f ${{ matrix.dockerfile }} -t "${{ steps.image.outputs.ref }}" .
+
+      # Cache the Trivy vulnerability DB across runs, keyed per UTC day (the DB updates
+      # roughly daily) - without this every PR/push re-downloads ~100MB per matrix leg and
+      # adds load to the public trivy-db mirror. restore-keys falls back to the newest
+      # available cache if today's exact key hasn't been written yet.
+      - name: Compute cache date
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Trivy vulnerability DB
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/trivy-cache
+          key: trivy-db-${{ steps.date.outputs.date }}
+          restore-keys: |
+            trivy-db-
+
+      # Scans the image already sitting in the runner's local Docker daemon (built above) by
+      # mounting its socket into the Trivy container - the same approach verified locally
+      # against both images, run directly via `docker run` rather than a marketplace Action
+      # (same reasoning as the gitleaks job: no extra third-party Action to trust/pin, full
+      # control of output). Pinned by tag + digest, same convention as the Dockerfiles.
+      #
+      # --ignore-unfixed: a CVE with no fix yet is not something this Dockerfile can act on;
+      # it would just be permanent, un-actionable red. HIGH/CRITICAL only, per the DoD.
+      # --ignorefile: the repo-root .trivyignore, which carves out exactly one CVE (the same
+      # known NU1903 Microsoft.OpenApi advisory already accepted in the NuGet scan step) -
+      # any OTHER high/critical finding, on either image, still fails the build.
+      - name: Scan image for CVEs (Trivy)
+        env:
+          TRIVY_IMAGE: aquasec/trivy:0.72.0@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f
+        run: |
+          set -u
+          mkdir -p "${RUNNER_TEMP}/trivy-cache" "${RUNNER_TEMP}/trivy-out"
+
+          # GitHub Actions runs `run:` steps as `bash -eo pipefail` by default, so `-e` is
+          # already active here - it must be turned OFF (not just left alone) before the
+          # scanner runs, or a HIGH/CRITICAL exit-code-1 would kill the script on this line
+          # and skip the job-summary write below entirely, which is the opposite of what a
+          # scan report is for.
+          set +e
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${RUNNER_TEMP}/trivy-cache:/root/.cache" \
+            -v "${RUNNER_TEMP}/trivy-out:/out" \
+            -v "${GITHUB_WORKSPACE}/.trivyignore:/tmp/.trivyignore:ro" \
+            "${TRIVY_IMAGE}" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --ignorefile /tmp/.trivyignore --exit-code 1 \
+              --format table --output /out/${{ matrix.name }}-trivy.txt \
+              "${{ steps.image.outputs.ref }}"
+          scan_status=$?
+          set -e
+
+          {
+            echo "### Trivy image scan - ${{ matrix.name }}"
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/trivy-out/${{ matrix.name }}-trivy.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          exit "$scan_status"
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-${{ matrix.name }}
+          path: ${{ runner.temp }}/trivy-out/${{ matrix.name }}-trivy.txt
+          retention-days: 7
+
+      # Publish only on an actual merge to main, never from a PR (including same-repo PRs) -
+      # a pushed image is a release artifact, not a PR-validation output.
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: docker push "${{ steps.image.outputs.ref }}"
+
+  # P0-SEC-01 (docs/10. Phase 0, section 5 - security-auditor). Blocks a merge that would
+  # commit a credential. Policy, rotation procedure and the dev/staging secret locations are
+  # in docs/security/secrets-policy.md; the ruleset is .gitleaks.toml at the repo root.
+  #
+  # Runs the official gitleaks container directly rather than gitleaks/gitleaks-action@v2:
+  # the action requires a GITLEAKS_LICENSE for repositories owned by a GitHub organisation
+  # and hard-fails without one. This repo is on a personal account today but the licence
+  # trap would surface as a broken required check on the day it moves to an org. The
+  # container has no such condition, is pinned by digest, and is the exact artefact that was
+  # verified locally before this job was written.
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 - scan the full history, not just the PR head. A secret added in an
+      # earlier commit of the branch and "removed" in a later one is still in the objects
+      # that get merged, and is still compromised.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # --redact is mandatory, not cosmetic: without it gitleaks prints the matched secret
+      # into the workflow log, which is readable by everyone with repo read access and is
+      # retained in the run artifacts. The scan must not become the disclosure.
+      - name: Scan git history for committed secrets
+        env:
+          # Pinned by digest as well as tag, same convention as the Dockerfiles. This is the
+          # exact image that was verified against a seeded test repo (see secrets-policy.md).
+          GITLEAKS_IMAGE: zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+        run: |
+          mkdir -p "${RUNNER_TEMP}/gitleaks"
+          # /repo is mounted read-only so the scanner cannot touch the checkout; the SARIF
+          # report goes to a separate writable mount. GIT_CONFIG_* marks /repo safe.directory
+          # because the checkout is owned by the runner user while the container runs as root,
+          # which git otherwise refuses with "dubious ownership".
+          # Kept on one line deliberately: backslash continuations inside a YAML block scalar
+          # are a recurring source of silently-mangled commands.
+          docker run --rm -v "${GITHUB_WORKSPACE}:/repo:ro" -v "${RUNNER_TEMP}/gitleaks:/out" -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo "${GITLEAKS_IMAGE}" git /repo --config /repo/.gitleaks.toml --report-format sarif --report-path /out/gitleaks-report.sarif --redact --verbose --exit-code 1
+
+      # Report is redacted (see above) so it is safe to retain. Uploaded on failure only -
+      # a clean run has nothing to inspect.
+      - name: Upload gitleaks report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitleaks-report
+          path: ${{ runner.temp }}/gitleaks/gitleaks-report.sarif
+          retention-days: 7
+
+      - name: Explain a failure
+        if: failure()
+        run: |
+          echo "::error::Secret detected. Do NOT just delete the commit - treat the value as"
+          echo "::error::compromised and rotate it first. Follow docs/security/secrets-policy.md section 5."
+
+  # Single required status check for branch protection - covers both stacks, the gitleaks
+  # secret scan, and (S1-DO-01) the container image build/scan. Add future required jobs to
+  # `needs:` here rather than as separate branch-protection rules.
+  ci-required:
+    name: CI required checks
+    if: always()
+    needs: [backend, frontend, secret-scan, images, migration-smoke]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "One or more required jobs did not succeed."
+            exit 1
+          fi

@@ -1,0 +1,194 @@
+{
+  "source": ".claude/knowledge/domain/approval-workflow.md",
+  "family": "Approval-Routing",
+  "note": "Routing algorithm summary (approval-workflow.md §5.3): A_route = abs(Amount) for VariationOrder, or G_k (gross certified value of the period) for PaymentCertificate. Select the project-specific active policy for the DocumentType, else the tenant-wide active policy; select all rules where MinAmount <= A_route < MaxAmount (or MaxAmount IS NULL); order by StepNo to form the chain. Apply cumulative-VO escalation (VO only) if (sum(approved VO) + Amount) / ContractValue * 100 > CumulativeVoEscalationPct, appending CumulativeVoEscalationRole as a final step if not already present. Fail closed: an empty chain blocks submission with ApprovalPolicyGap (422) - never auto-approve.",
+  "policies": {
+    "TH-Default-VO": {
+      "currency": "THB",
+      "cumulativeVoEscalationPct": 10.00,
+      "cumulativeVoEscalationRole": "Executive",
+      "contractValue": 485000000.00,
+      "ruleTableVerbatim": [
+        { "stepNo": 1, "minAmount": 0.00, "maxAmount": 500000.00, "requiredRole": "ProjectManager" },
+        { "stepNo": 1, "minAmount": 500000.00, "maxAmount": 5000000.00, "requiredRole": "ProjectManager" },
+        { "stepNo": 2, "minAmount": 500000.00, "maxAmount": 5000000.00, "requiredRole": "ProjectDirector" },
+        { "stepNo": 1, "minAmount": 5000000.00, "maxAmount": null, "requiredRole": "ProjectManager" },
+        { "stepNo": 2, "minAmount": 5000000.00, "maxAmount": null, "requiredRole": "ProjectDirector" },
+        { "stepNo": 3, "minAmount": 5000000.00, "maxAmount": null, "requiredRole": "Executive" }
+      ],
+      "derivedBandsForConvenience": [
+        { "band": "[0.00, 500000.00)", "chain": ["ProjectManager"] },
+        { "band": "[500000.00, 5000000.00)", "chain": ["ProjectManager", "ProjectDirector"] },
+        { "band": "[5000000.00, null)", "chain": ["ProjectManager", "ProjectDirector", "Executive"] }
+      ]
+    },
+    "TH-Default-IPC": {
+      "currency": "THB",
+      "ruleTableVerbatim": [
+        { "stepNo": 1, "minAmount": 0.00, "maxAmount": null, "requiredRole": "QS" },
+        { "stepNo": 2, "minAmount": 0.00, "maxAmount": null, "requiredRole": "ProjectManager" },
+        { "stepNo": 3, "minAmount": 10000000.00, "maxAmount": null, "requiredRole": "ProjectDirector" }
+      ],
+      "derivedBandsForConvenience": [
+        { "band": "[0.00, 10000000.00)", "chain": ["QS", "ProjectManager"] },
+        { "band": "[10000000.00, null)", "chain": ["QS", "ProjectManager", "ProjectDirector"] }
+      ]
+    }
+  },
+  "fixtures": [
+    {
+      "fixtureId": "R1",
+      "description": "R1 - VO-018 Add against TH-Default-VO (approval-workflow.md line 237).",
+      "policy": "TH-Default-VO",
+      "inputs": {
+        "documentRef": "VO-018",
+        "voType": "Add",
+        "amount": 2400000.00,
+        "cumulativeApprovedVoBefore": 6000000.00
+      },
+      "expected": {
+        "aRoute": 2400000.00,
+        "chain": ["ProjectManager", "ProjectDirector"],
+        "stepCount": 2
+      }
+    },
+    {
+      "fixtureId": "R2",
+      "description": "R2 - VO-015 Deduct against TH-Default-VO; proves the absolute-value routing rule - signed routing would yield an empty chain (approval-workflow.md line 238).",
+      "policy": "TH-Default-VO",
+      "inputs": {
+        "documentRef": "VO-015",
+        "voType": "Deduct",
+        "amount": -800000.00
+      },
+      "expected": {
+        "aRoute": 800000.00,
+        "aRouteFormula": "abs(Amount)",
+        "chain": ["ProjectManager", "ProjectDirector"]
+      }
+    },
+    {
+      "fixtureId": "R3",
+      "description": "R3 - VO Add, single-step band (approval-workflow.md line 239).",
+      "policy": "TH-Default-VO",
+      "inputs": {
+        "voType": "Add",
+        "amount": 300000.00
+      },
+      "expected": {
+        "aRoute": 300000.00,
+        "chain": ["ProjectManager"],
+        "stepCount": 1
+      }
+    },
+    {
+      "fixtureId": "R4",
+      "description": "R4 - VO Add with cumulative-VO escalation appended as a 3rd step (approval-workflow.md line 240). (46,000,000 + 3,200,000) / 485,000,000 = 10.14% > 10%.",
+      "policy": "TH-Default-VO",
+      "inputs": {
+        "voType": "Add",
+        "amount": 3200000.00,
+        "cumulativeApprovedVoBefore": 46000000.00
+      },
+      "expected": {
+        "aRoute": 3200000.00,
+        "bandChain": ["ProjectManager", "ProjectDirector"],
+        "escalationPctFullPrecision": 10.144329896907216494845360820,
+        "escalationPctSourceText": "10.14%",
+        "escalationTriggered": true,
+        "finalChain": ["ProjectManager", "ProjectDirector", "Executive"],
+        "note": "Band alone gives 2 steps; escalation appends the 3rd (Executive) because 10.14% > CumulativeVoEscalationPct 10.00%."
+      }
+    },
+    {
+      "fixtureId": "R5",
+      "description": "R5 - VO Add against a DIFFERENT hypothetical policy (not TH-Default-VO) whose lowest MinAmount is 100,000.00, demonstrating the fail-closed ApprovalPolicyGap rule (approval-workflow.md line 241).",
+      "policy": "hypothetical-policy-min-100000-not-TH-Default-VO",
+      "inputs": {
+        "voType": "Add",
+        "amount": 50000.00,
+        "hypotheticalPolicyLowestMinAmount": 100000.00
+      },
+      "expected": {
+        "aRoute": 50000.00,
+        "chain": null,
+        "result": "submission blocked",
+        "errorType": "ApprovalPolicyGap",
+        "httpStatus": 422,
+        "rule": "must not auto-approve"
+      }
+    },
+    {
+      "fixtureId": "R6",
+      "description": "R6 - boundary test: VO Add exactly at the 500,000.00 band edge (approval-workflow.md line 242). MinAmount inclusive, MaxAmount exclusive.",
+      "policy": "TH-Default-VO",
+      "inputs": {
+        "voType": "Add",
+        "amount": 500000.00
+      },
+      "expected": {
+        "aRoute": 500000.00,
+        "chain": ["ProjectManager", "ProjectDirector"],
+        "rule": "500000.00 belongs to band [500000.00, 5000000.00), not [0.00, 500000.00), because MinAmount is inclusive and the previous band's MaxAmount is exclusive"
+      }
+    },
+    {
+      "fixtureId": "R7",
+      "description": "R7 - Payment Certificate against TH-Default-IPC, above the ProjectDirector threshold (approval-workflow.md line 249).",
+      "policy": "TH-Default-IPC",
+      "inputs": {
+        "grossCertifiedAmount_Gk": 21600000.00
+      },
+      "expected": {
+        "aRoute": 21600000.00,
+        "chain": ["QS", "ProjectManager", "ProjectDirector"]
+      }
+    },
+    {
+      "fixtureId": "R8",
+      "description": "R8 - Payment Certificate against TH-Default-IPC, below the ProjectDirector threshold (approval-workflow.md line 250).",
+      "policy": "TH-Default-IPC",
+      "inputs": {
+        "grossCertifiedAmount_Gk": 5000000.00
+      },
+      "expected": {
+        "aRoute": 5000000.00,
+        "chain": ["QS", "ProjectManager"]
+      }
+    },
+    {
+      "fixtureId": "R9",
+      "description": "R9 - R7's certificate approved by QS, then returned for revision by PM, resubmitted at a lower gross amount; proves revision voiding + re-resolution (approval-workflow.md line 251).",
+      "policy": "TH-Default-IPC",
+      "inputs": {
+        "basedOn": "R7",
+        "sequence": ["QS approves step 1", "PM returns for revision", "resubmit"],
+        "resubmittedGrossCertifiedAmount_Gk": 9000000.00
+      },
+      "expected": {
+        "revisionNo": 2,
+        "priorQsApprovalVoided": true,
+        "aRoute": 9000000.00,
+        "chain": ["QS", "ProjectManager"],
+        "rule": "9,000,000.00 < 10,000,000.00 ProjectDirector threshold, so the re-resolved chain drops ProjectDirector even though R7's original chain had it; re-approval starts at step 1"
+      }
+    },
+    {
+      "fixtureId": "R10",
+      "description": "R10 - R8's certificate where the QS is also the document submitter; proves self-approval rejection (approval-workflow.md line 252).",
+      "policy": "TH-Default-IPC",
+      "inputs": {
+        "basedOn": "R8",
+        "grossCertifiedAmount_Gk": 5000000.00,
+        "actorRole": "QS",
+        "actorIsSubmitter": true,
+        "policyAllowSelfApproval": false
+      },
+      "expected": {
+        "action": "Approve",
+        "result": "rejected",
+        "errorType": "SelfApprovalNotPermitted"
+      }
+    }
+  ]
+}

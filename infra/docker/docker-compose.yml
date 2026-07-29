@@ -1,0 +1,125 @@
+# infra/docker/docker-compose.yml
+#
+# Production-equivalent topology (P0-DO-02 / ADR-0010): api + web + mssql + S3-compatible
+# object storage, all configured from environment variables only. This same topology is
+# what Sprint 16A's staging deployment reuses before the AWS-vs-Azure decision gate - no
+# provider-specific service appears here by design.
+#
+# Usage:
+#   cp infra/docker/.env.example infra/docker/.env
+#   # edit infra/docker/.env with real local values
+#   docker compose -f infra/docker/docker-compose.yml --env-file infra/docker/.env up -d --build
+#   curl http://localhost:${API_HOST_PORT:-5000}/health/ready
+#
+# `.env` is git-ignored (see infra/docker/mssql/.gitignore and root .dockerignore) - only
+# `.env.example` is committed.
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/api.Dockerfile
+    image: cmplus/api:${IMAGE_TAG:-local}
+    environment:
+      ASPNETCORE_ENVIRONMENT: "${ASPNETCORE_ENVIRONMENT:-Production}"
+      # CmPlusDbContext (S1-BE-03/S2-BE-04..07) reads this via
+      # configuration.GetConnectionString("CmPlusDatabase") (CMPlus.Infrastructure.DependencyInjection) -
+      # the key name is corrected here to actually match (was "ConnectionStrings__Default", a
+      # Sprint 1 leftover from before the DbContext was implemented, which would have silently
+      # resolved to a null connection string and failed at first use).
+      ConnectionStrings__CmPlusDatabase: "Server=mssql,1433;Database=${MSSQL_APP_DB:-CMPlusDb};User Id=${MSSQL_APP_USER:-cmplus_app};Password=${MSSQL_APP_PASSWORD:?set MSSQL_APP_PASSWORD in .env};TrustServerCertificate=True"
+      # Reserved for the Sprint 1+ IFileStorage S3-compatible adapter (CMPlus.Application.Abstractions.IFileStorage,
+      # ADR-0010) - MinIO stands in for the still-undecided AWS S3 vs Azure Blob choice.
+      FileStorage__ServiceUrl: "http://minio:9000"
+      FileStorage__AccessKey: "${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}"
+      FileStorage__SecretKey: "${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}"
+      FileStorage__Bucket: "${MINIO_BUCKET:-cmplus-files}"
+      # JWT auth (S2-BE-01/S2-SEC-01) - signing key is a secret, never defaulted.
+      Jwt__SigningKey: "${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}"
+      Jwt__Issuer: "${JWT_ISSUER:-CMPlus}"
+      Jwt__Audience: "${JWT_AUDIENCE:-CMPlusClients}"
+      Jwt__ExpiryMinutes: "${JWT_EXPIRY_MINUTES:-60}"
+    ports:
+      - "${API_HOST_PORT:-5000}:8080"
+    depends_on:
+      mssql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    # HEALTHCHECK is baked into api.Dockerfile (GET /health/live); no override needed here.
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/web.Dockerfile
+    image: cmplus/web:${IMAGE_TAG:-local}
+    ports:
+      - "${WEB_HOST_PORT:-8081}:8080"
+    depends_on:
+      - api
+    restart: unless-stopped
+    # HEALTHCHECK is baked into web.Dockerfile; no override needed here.
+
+  # --- database-engineer's service (P0-DB-01) -------------------------------------------
+  # Copied from infra/docker/mssql/docker-compose.mssql.yml per their README instructions;
+  # env var names kept identical so infra/docker/.env stays the single source of truth.
+  mssql:
+    build:
+      context: ./mssql
+      dockerfile: Dockerfile
+    image: cmplus/mssql:local
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "${MSSQL_PID:-Developer}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}"
+      MSSQL_APP_DB: "${MSSQL_APP_DB:-CMPlusDb}"
+      MSSQL_APP_USER: "${MSSQL_APP_USER:-cmplus_app}"
+      MSSQL_APP_PASSWORD: "${MSSQL_APP_PASSWORD:?set MSSQL_APP_PASSWORD in .env}"
+    ports:
+      # Bound to loopback only: this is an admin-plane port carrying the sa/app password
+      # (default value in .env.example, so anyone on the same network segment as a laptop
+      # would otherwise get unauthenticated-by-obscurity DB access - P0-SEC-01 finding).
+      - "127.0.0.1:${MSSQL_HOST_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -N -Q \"SELECT 1\" || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # --- S3-compatible object storage (ADR-0010) -------------------------------------------
+  # Stands in for the deferred AWS S3 vs Azure Blob decision (Sprint 16B gate). Pinned by
+  # digest (resolved from the `latest` tag at authoring time - MinIO does not publish
+  # long-lived semver tags, only dated RELEASE.* tags, so a digest pin is the stable anchor).
+  minio:
+    image: minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}"
+    ports:
+      # Bound to loopback only, same reason as mssql above - the console port in particular
+      # is a full admin UI behind the default root credentials from .env.example.
+      - "127.0.0.1:${MINIO_API_HOST_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_HOST_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  mssql-data:
+  minio-data:

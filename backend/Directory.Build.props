@@ -1,0 +1,19 @@
+<Project>
+
+  <!-- Shared build settings for every CMPlus project (src/ and tests/). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Compiler warnings are errors; NuGet restore/audit advisories (NUxxxx) are excluded so a
+         known upstream package advisory does not block a local build - security-auditor / CI
+         vulnerability scanning (ADR-0010) tracks those separately. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>NU1900;NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,46 @@
+# infra/docker/mssql/docker-compose.mssql.yml
+#
+# Standalone compose file for the SQL Server service only — lets database-engineer /
+# backend-developer run and verify the container in isolation before it is wired into
+# the full-stack `infra/docker/docker-compose.yml` by devops-engineer (P0-DO-02).
+#
+# devops-engineer: copy the `mssql` service block below (or `include:` this file) into
+# the top-level compose file; keep the same env var names so `.env` stays a single
+# source of truth across services.
+#
+# Usage:
+#   cp infra/docker/mssql/.env.mssql.example infra/docker/mssql/.env
+#   # edit infra/docker/mssql/.env with real local passwords
+#   docker compose -f infra/docker/mssql/docker-compose.mssql.yml --env-file infra/docker/mssql/.env up -d
+#
+services:
+  mssql:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cmplus/mssql:local
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "${MSSQL_PID:-Developer}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}"
+      MSSQL_APP_DB: "${MSSQL_APP_DB:-CMPlusDb}"
+      MSSQL_APP_USER: "${MSSQL_APP_USER:-cmplus_app}"
+      MSSQL_APP_PASSWORD: "${MSSQL_APP_PASSWORD:?set MSSQL_APP_PASSWORD in .env}"
+    ports:
+      - "${MSSQL_HOST_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -N -Q \"SELECT 1\" || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mssql-data:

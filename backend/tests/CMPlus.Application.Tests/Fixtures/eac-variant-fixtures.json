@@ -1,0 +1,304 @@
+{
+  "source": ".claude/knowledge/domain/evm-formulas.md#eac-variants-selectable",
+  "family": "EAC-Variants",
+  "precisionNote": "Same convention as evm-fixtures.json: FullPrecision fields computed directly from raw BAC/PV/EV/AC with .NET System.Decimal (28-29 significant digits); Rounded2dp fields are the money-precision values stated verbatim in the source. Rounding rule: half-away-from-zero at the response boundary only (MidpointRounding.AwayFromZero) - .NET's Math.Round defaults to banker's rounding and MUST NOT be used unqualified (evm-formulas.md line 104-108).",
+  "unifiedPerformanceFactorForm": {
+    "etc": "PF * (BAC - EV)",
+    "eac": "AC + ETC",
+    "vac": "BAC - EAC",
+    "note": "Every PF-based variant is the same formula with a different Performance Factor PF - implement one function, not five (line 55-58)."
+  },
+  "variants": [
+    { "enum": "CpiBased", "isDefault": true, "pf": "1/CPI", "eacFormula": "BAC/CPI", "when": "Current cost performance is typical and will continue; default for unit-rate/repetitive construction work." },
+    { "enum": "Atypical", "pf": 1, "eacFormula": "AC + (BAC - EV)", "when": "The overrun/underrun was a one-off with a documented root cause; remaining work runs at the planned rate." },
+    { "enum": "CpiSpiBased", "pf": "1/(CPI*SPI)", "eacFormula": "AC + (BAC - EV)/(CPI*SPI)", "when": "Schedule slippage is itself driving cost; most conservative when CPI<1 and SPI<1." },
+    { "enum": "BottomUpEtc", "pf": null, "eacFormula": "AC + ETC_manual", "when": "A fresh bottom-up re-estimate of remaining work exists; overrides all indices; requires Project.EacManualEtc >= 0." },
+    { "enum": "CustomPf", "pf": "user-supplied PF_c", "eacFormula": "AC + PF_c * (BAC - EV)", "when": "Contract- or QS-mandated factor (e.g. lender's agreed 1.15); PF_c must be > 0, rejected at validation otherwise." }
+  ],
+  "identities": [
+    {
+      "id": "IDENTITY-PF-EQUALS-1-OVER-CPI-COLLAPSES-TO-BAC-OVER-CPI",
+      "statement": "PF = 1/CPI algebraically collapses to BAC/CPI (evm-formulas.md line 68-70).",
+      "derivation": "AC + (BAC-EV)/CPI = AC + AC*(BAC-EV)/EV = (AC*BAC)/EV = BAC/CPI"
+    },
+    {
+      "id": "INVARIANT-ATYPICAL-VAC-EQUALS-CV",
+      "statement": "Atypical always satisfies VAC = CV (evm-formulas.md line 74).",
+      "derivation": "BAC - AC - BAC + EV = EV - AC = CV"
+    },
+    {
+      "id": "INVARIANT-TCPI-VS-CPIBASED-EQUALS-CPI",
+      "statement": "TCPI measured against the CpiBased EAC always equals CPI exactly (evm-formulas.md line 75-76).",
+      "formula": "(BAC - EV) / (EAC_CpiBased - AC) = CPI"
+    }
+  ],
+  "fixtures": [
+    {
+      "fixtureId": "A-BASE",
+      "description": "Base scalars for A1-A5 (same as EVM-A in evm-fixtures.json), restated here for self-containment (evm-formulas.md lines 112-114).",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "cpiFullPrecision": 0.8571428571428571428571428571,
+        "cpiSourceText": "6/7 = 0.857142857…",
+        "spi": 0.75,
+        "bacMinusEv": 700000.00
+      }
+    },
+    {
+      "fixtureId": "A1",
+      "description": "Variant expansion of Fixture A - CpiBased (evm-formulas.md line 118). Unchanged from the original EVM-A default EAC; the existing test must still pass.",
+      "variant": "CpiBased",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "pfFullPrecision": 1.1666666666666666666666666667,
+        "pfSourceText": "7/6 = 1.166667",
+        "etcRounded2dp": 816666.67,
+        "etcFullPrecision": 816666.6666666666666666666667,
+        "eacRounded2dp": 1166666.67,
+        "eacFullPrecision": 1166666.6666666666666666666667,
+        "vacRounded2dp": -166666.67,
+        "vacFullPrecision": -166666.6666666666666666666667
+      }
+    },
+    {
+      "fixtureId": "A2",
+      "description": "Variant expansion of Fixture A - Atypical (evm-formulas.md line 119).",
+      "variant": "Atypical",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "pf": 1,
+        "etcRounded2dp": 700000.00,
+        "eacRounded2dp": 1050000.00,
+        "vacRounded2dp": -50000.00,
+        "vacEqualsCvCheck": -50000.00
+      }
+    },
+    {
+      "fixtureId": "A3",
+      "description": "Variant expansion of Fixture A - CpiSpiBased (evm-formulas.md line 120).",
+      "variant": "CpiSpiBased",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "pfFullPrecision": 1.5555555555555555555555555556,
+        "pfSourceText": "14/9 = 1.555556",
+        "etcRounded2dp": 1088888.89,
+        "etcFullPrecision": 1088888.8888888888888888888889,
+        "eacRounded2dp": 1438888.89,
+        "eacFullPrecision": 1438888.8888888888888888888889,
+        "vacRounded2dp": -438888.89,
+        "vacFullPrecision": -438888.8888888888888888888889
+      }
+    },
+    {
+      "fixtureId": "A4",
+      "description": "Variant expansion of Fixture A - BottomUpEtc with a manual re-estimate (evm-formulas.md line 121).",
+      "variant": "BottomUpEtc",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00, "etcManual": 760000.00 },
+      "expected": {
+        "etcRounded2dp": 760000.00,
+        "eacRounded2dp": 1110000.00,
+        "vacRounded2dp": -110000.00
+      }
+    },
+    {
+      "fixtureId": "A5",
+      "description": "Variant expansion of Fixture A - CustomPf (evm-formulas.md line 122).",
+      "variant": "CustomPf",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 350000.00, "customPf": 1.20 },
+      "expected": {
+        "pf": 1.20,
+        "etcRounded2dp": 840000.00,
+        "eacRounded2dp": 1190000.00,
+        "vacRounded2dp": -190000.00
+      }
+    },
+    {
+      "fixtureId": "A-TCPI",
+      "description": "TCPI checks for Fixture A (evm-formulas.md line 124).",
+      "inputs": { "bac": 1000000.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "tcpiBacFullPrecision": 1.0769230769230769230769230769,
+        "tcpiBacSourceText": "700000/650000 = 1.0769…",
+        "tcpiVsA1EacEqualsCpiCheck": 0.8571428571428571428571428571
+      }
+    },
+    {
+      "fixtureId": "D-BASE",
+      "description": "Fixture D - new scenario, ahead of schedule and under budget (evm-formulas.md lines 129-130).",
+      "inputs": { "bac": 500000.00, "pv": 200000.00, "ev": 220000.00, "ac": 200000.00 },
+      "expected": {
+        "sv": 20000.00,
+        "cv": 20000.00,
+        "spi": 1.10,
+        "cpi": 1.10,
+        "bacMinusEv": 280000.00
+      }
+    },
+    {
+      "fixtureId": "D1",
+      "description": "Variant expansion of Fixture D - CpiBased (evm-formulas.md line 134).",
+      "variant": "CpiBased",
+      "inputs": { "bac": 500000.00, "pv": 200000.00, "ev": 220000.00, "ac": 200000.00 },
+      "expected": {
+        "pfFullPrecision": 0.9090909090909090909090909091,
+        "pfSourceText": "1/1.10 = 0.909091",
+        "etcRounded2dp": 254545.45,
+        "etcFullPrecision": 254545.45454545454545454545455,
+        "eacRounded2dp": 454545.45,
+        "eacFullPrecision": 454545.45454545454545454545455,
+        "vacRounded2dp": 45454.55,
+        "vacFullPrecision": 45454.54545454545454545454545
+      }
+    },
+    {
+      "fixtureId": "D2",
+      "description": "Variant expansion of Fixture D - Atypical (evm-formulas.md line 135).",
+      "variant": "Atypical",
+      "inputs": { "bac": 500000.00, "pv": 200000.00, "ev": 220000.00, "ac": 200000.00 },
+      "expected": {
+        "pf": 1,
+        "etcRounded2dp": 280000.00,
+        "eacRounded2dp": 480000.00,
+        "vacRounded2dp": 20000.00,
+        "vacEqualsCvCheck": 20000.00
+      }
+    },
+    {
+      "fixtureId": "D3",
+      "description": "Variant expansion of Fixture D - CpiSpiBased (evm-formulas.md line 136).",
+      "variant": "CpiSpiBased",
+      "inputs": { "bac": 500000.00, "pv": 200000.00, "ev": 220000.00, "ac": 200000.00 },
+      "expected": {
+        "pfFullPrecision": 0.8264462809917355371900826446,
+        "pfSourceText": "1/1.21 = 0.826446",
+        "etcRounded2dp": 231404.96,
+        "etcFullPrecision": 231404.95867768595041322314049,
+        "eacRounded2dp": 431404.96,
+        "eacFullPrecision": 431404.95867768595041322314049,
+        "vacRounded2dp": 68595.04,
+        "vacFullPrecision": 68595.04132231404958677685951
+      }
+    },
+    {
+      "fixtureId": "D-TCPI",
+      "description": "TCPI_BAC check for Fixture D (evm-formulas.md line 138).",
+      "inputs": { "bac": 500000.00, "ev": 220000.00, "ac": 200000.00 },
+      "expected": {
+        "tcpiBacFullPrecision": 0.9333333333333333333333333333,
+        "tcpiBacSourceText": "280000/300000 = 0.9333"
+      }
+    },
+    {
+      "fixtureId": "E",
+      "description": "Edge fixture E - missing actuals (evm-formulas.md line 145).",
+      "inputs": { "bac": 1000000.00, "pv": 400000.00, "ev": 300000.00, "ac": 0.00 },
+      "expected": {
+        "cpi": null,
+        "cpiBased": null,
+        "cpiSpiBased": null,
+        "atypical": null,
+        "nullReason": "NoActualCost",
+        "bottomUpEtc": "valid (requires ETC_manual)"
+      }
+    },
+    {
+      "fixtureId": "F",
+      "description": "Edge fixture F - no baseline (evm-formulas.md line 146).",
+      "inputs": { "bac": 1000000.00, "pv": 0.00, "ev": 300000.00, "ac": 350000.00 },
+      "expected": {
+        "spi": null,
+        "cpiSpiBased": null,
+        "cpiSpiBasedNullReason": "NoPlannedValue",
+        "cpiBasedRounded2dp": 1166666.67,
+        "atypicalRounded2dp": 1050000.00
+      }
+    },
+    {
+      "fixtureId": "G",
+      "description": "Edge fixture G - zero earned (evm-formulas.md line 147).",
+      "inputs": { "bac": 1000000.00, "pv": 100000.00, "ev": 0.00, "ac": 50000.00 },
+      "expected": {
+        "cpi": 0,
+        "spi": 0,
+        "cpiBased": null,
+        "cpiSpiBased": null,
+        "nullReason": "ZeroCpi",
+        "atypicalRounded2dp": 1050000.00
+      }
+    },
+    {
+      "fixtureId": "H",
+      "description": "Edge fixture H - nothing remaining, BAC-EV=0 short-circuit (evm-formulas.md line 148).",
+      "inputs": { "bac": 1000000.00, "ev": 1000000.00, "ac": 1100000.00 },
+      "expected": {
+        "etcAllVariants": 0.00,
+        "eacAllVariants": 1100000.00,
+        "vacAllVariants": -100000.00,
+        "rule": "short-circuit before dividing: PF is never evaluated for any variant"
+      }
+    },
+    {
+      "fixtureId": "I",
+      "description": "Edge fixture I - zero-budget project (evm-formulas.md line 149).",
+      "inputs": { "bac": 0.00, "pv": 0.00, "ev": 0.00, "ac": 0.00 },
+      "expected": {
+        "allVariants": null,
+        "nullReason": "NotStarted",
+        "rule": "do not return 0.00"
+      }
+    }
+  ],
+  "orderingAssertions": [
+    {
+      "id": "ORDER-UNFAVOURABLE-FIXTURE-A",
+      "condition": "CPI<1 and SPI<1",
+      "expectedAscendingEacOrder": ["Atypical", "CpiBased", "CpiSpiBased"],
+      "expectedEacRounded2dp": [1050000.00, 1166666.67, 1438888.89]
+    },
+    {
+      "id": "ORDER-FAVOURABLE-FIXTURE-D",
+      "condition": "CPI>1 and SPI>1 (mirror of Fixture A - ordering reverses)",
+      "expectedAscendingEacOrder": ["CpiSpiBased", "CpiBased", "Atypical"],
+      "expectedEacRounded2dp": [431404.96, 454545.45, 480000.00]
+    }
+  ],
+  "edgeCaseRules": [
+    {
+      "condition": "BAC - EV = 0 (work complete, or zero-budget scope)",
+      "behaviour": "Short-circuit before dividing: ETC = 0.00, EAC = AC for every variant. Never evaluate PF.",
+      "concreteFixture": "H"
+    },
+    {
+      "condition": "EV = 0 and AC = 0 and PV = 0 (not started)",
+      "behaviour": "All variants -> null, reason NotStarted. Render em-dash.",
+      "concreteFixture": "I"
+    },
+    {
+      "condition": "AC = 0 and EV > 0 (actuals not yet posted)",
+      "behaviour": "CPI undefined -> CpiBased, CpiSpiBased, and (by rule) Atypical all -> null, reason NoActualCost, plus a data-quality warning. Atypical is arithmetically computable (= BAC-EV) but excludes the cost of work already done, so it is suppressed on purpose. BottomUpEtc remains valid if ETC_manual is supplied.",
+      "concreteFixture": "E"
+    },
+    {
+      "condition": "PV = 0 and EV > 0 (no baseline / unbaselined scope)",
+      "behaviour": "SPI undefined -> CpiSpiBased -> null, reason NoPlannedValue. CpiBased, Atypical, BottomUpEtc, CustomPf remain valid.",
+      "concreteFixture": "F"
+    },
+    {
+      "condition": "EV = 0 and AC > 0 (cost burned, nothing earned)",
+      "behaviour": "CPI = 0 -> CpiBased, CpiSpiBased -> null (division by zero), reason ZeroCpi. Atypical = AC + BAC is valid and is what the dashboard should show.",
+      "concreteFixture": "G"
+    },
+    {
+      "condition": "EV > BAC (progress or weights corrupt)",
+      "behaviour": "ETC goes negative. Compute and return as-is, and raise validation warning EarnedValueExceedsBudget. Clamp ProgressPercentage to [0,100] at input instead of masking it here.",
+      "concreteFixture": null,
+      "gap": "No worked numeric example given in source for this condition - only the qualitative rule. Do not fabricate a fixture; obtain concrete numbers from domain-expert before Sprint 7 if a numeric test is required."
+    },
+    {
+      "condition": "PF_c <= 0 for CustomPf",
+      "behaviour": "Reject at validation (FluentValidation), do not compute.",
+      "concreteFixture": null,
+      "gap": "No specific boundary values given in source (e.g. whether PF_c = 0 exactly is covered by '<=' - yes per the stated condition). No worked fixture provided; Sprint 7 FluentValidation test can use PF_c = 0 and PF_c = -1 as natural boundary/negative probes, but these are not verbatim source fixtures."
+    }
+  ]
+}

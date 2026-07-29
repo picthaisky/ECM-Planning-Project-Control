@@ -1,0 +1,29 @@
+/* Self-hosted fonts (offline-first: no Google Fonts CDN dependency in the field). */
+@import '@fontsource/ibm-plex-sans-thai/400.css';
+@import '@fontsource/ibm-plex-sans-thai/500.css';
+@import '@fontsource/ibm-plex-sans-thai/600.css';
+@import '@fontsource/bai-jamjuree/500.css';
+@import '@fontsource/bai-jamjuree/600.css';
+@import '@fontsource/bai-jamjuree/700.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply bg-bg text-text;
+  }
+
+  body {
+    @apply font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-heading;
+  }
+}

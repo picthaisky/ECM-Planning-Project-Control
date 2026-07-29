@@ -1,0 +1,132 @@
+# gitleaks configuration for CM+ Project Control (P0-SEC-01, docs/10. Phase 0 section 5).
+# Consumed by the `secret-scan` job in .github/workflows/ci.yml.
+#
+# WHY THIS FILE EXISTS: gitleaks' default ruleset was verified locally against a disposable
+# repo seeded with this project's real secret classes. It correctly flagged the AWS access
+# key, the GitHub PAT and a high-entropy JWT signing key - but it did NOT flag any of:
+#     MSSQL_SA_PASSWORD=<literal>
+#     MINIO_ROOT_PASSWORD=<literal>
+#     "Server=...;User Id=cmplus_app;Password=<literal>;TrustServerCertificate=True"
+# because there is no default rule for connection-string / plain password assignments, and
+# DB passwords are frequently below the generic-api-key entropy floor. Those three are the
+# top secret classes for this repo (docs/security/secrets-policy.md section 1), so the
+# default set alone would have satisfied the CI job while missing what actually matters.
+#
+# NOTES FOR EDITORS
+#  1. gitleaks uses Go's RE2 engine - no lookahead/lookbehind/backreferences. "value must not
+#     start with $ / % / ? / +" is therefore expressed as a negated character class on the
+#     first captured character, not as (?!...).
+#  2. The keyword alternations deliberately have NO leading \b. `_` is a word character, so
+#     `\bpassword` does NOT match the PASSWORD in `MSSQL_SA_PASSWORD=` or `MINIO_ROOT_PASSWORD=`
+#     - precisely the cases this file exists to catch. Both forms were tested; do not "tidy"
+#     a \b back in without re-running the verification in docs/security/secrets-policy.md.
+#  3. `?` and `+` are excluded from the first value character to skip shell/compose parameter
+#     expansion (`${MSSQL_SA_PASSWORD:?msg}` in infra/docker/mssql/entrypoint.sh). `-` is NOT
+#     excluded on purpose: `${DB_PASSWORD:-Passw0rd123}` is a hardcoded default credential and
+#     must still fail the build.
+
+title = "CM+ Project Control secret scanning"
+
+# Keep every upstream rule (AWS/GCP/Azure keys, GitHub/GitLab tokens, private keys, JWTs,
+# Slack, Stripe, ...) and layer project-specific rules on top.
+[extend]
+useDefault = true
+
+# ---------------------------------------------------------------------------
+# Rule 1 - literal password assignments.
+# Covers MSSQL sa/app passwords, MinIO root password, and `Password=`/`Pwd=` inside an
+# ADO.NET connection string. Intentionally has no entropy floor: `Summer2026!` is a real
+# and fully exploitable production password but scores low on entropy.
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "cmplus-password-assignment"
+description = "Literal password assignment (MSSQL sa/app, MinIO root, or connection-string Password=)"
+regex = '''(?i)(?:password|passwd|pwd)\s*[=:]\s*["']?([^\s;,"'<>{}$%?+][^\s;,"'<>{}]{5,})'''
+keywords = ["password", "passwd", "pwd"]
+
+  [rules.allowlist]
+  # Applied to the whole match, so a placeholder value clears the finding regardless of
+  # which key it was assigned to. This is deliberately value-based rather than path-based:
+  # allowlisting `**/*.example` wholesale would let a real secret pasted into a template
+  # file pass CI, which is a common way secrets actually leak.
+  regexTarget = "match"
+  regexes = [
+    # Env-var / template interpolation that reached the matcher despite the leading-char class.
+    '''(?:\$\{|\$\(|\$[A-Za-z_]|%[A-Za-z_]+%|\{\{)''',
+    # Documented placeholder conventions used by infra/docker/.env.example et al.
+    '''(?i)(?:ch4ngeme|change[-_]?me|replace[-_]?me|your[-_ ]?|placeholder|dummy|sample|example|redacted|<[^>]+>|x{4,}|\*{3,}|todo|tbd)''',
+    # S2-SEC-01 false positive: a TS/C# type annotation (`password: string`, web/src/features/
+    # auth/types.ts) is shaped identically to a real assignment to this entropy-floor-free rule.
+    # Anchored to require the *entire* captured value to be exactly one bare type keyword (not
+    # merely contain one as a substring) - a real password that happens to contain "string"
+    # (e.g. "MyStr1ngSecret!") still has trailing/quoting characters this pattern does not match,
+    # so it still fails the build.
+    '''(?i):\s*(?:string|number|boolean|int|bool|guid|decimal|datetimeoffset)\s*[;,)\]]*$''',
+    # S2-SEC-01 accepted exception: `CMPlus.Infrastructure.Persistence.Seed.DevDataSeeder
+    # .DevSeedPassword` ("Dev@CMPlus2026!") is a fixed, documented, dev/CI-only credential shared
+    # by every seeded user across every tenant, precisely so a developer can log into their local
+    # seeded environment by email alone - see the constant's own doc comment. It authenticates
+    # against nothing real (no staging/production system ever uses it), so unlike every other
+    # entry in this file there is nothing to rotate; committing it in cleartext is the intended,
+    # reviewed design, not an oversight. Matches both the literal value (backend seeder, and the
+    # frontend test that mirrors it) and references to the constant by name (backend tests) so
+    # every occurrence clears together instead of needing one allowlist entry per call site.
+    '''Dev@CMPlus2026!''',
+    '''DevSeedPassword''',
+    # S4-QA-01 false positive (tests/perf/wbs-tree.k6.js): `const LOGIN_PASSWORD = __ENV.LOGIN_PASSWORD
+    # || 'Dev@CMPlus2026!'` and `password: LOGIN_PASSWORD` both trip this rule, but neither captured
+    # match actually reaches the quoted literal - the value-capture stops at the first space/brace,
+    # so what gets flagged is only the *unquoted identifier* (`__ENV.LOGIN_PASSWORD` or
+    # `LOGIN_PASSWORD` itself), never a string value. In JS/TS/C# source a bare, unquoted value after
+    # `=`/`:` can only be a variable/environment reference, a function call, or a keyword - never a
+    # literal secret string (those always require quotes) - so this is safe to allow generally, not
+    # just for this one script. `__ENV\.` covers k6's own env-var syntax explicitly; the bare
+    # ALL_CAPS/underscore identifier pattern (anchored to end-of-match, no quotes/other punctuation)
+    # covers the plain-reference case.
+    '''(?i)__ENV\.[A-Z_][A-Z0-9_]*$''',
+    '''^[^"']*[=:]\s*[A-Z_][A-Z0-9_]*$''',
+  ]
+
+# ---------------------------------------------------------------------------
+# Rule 2 - service credential assignments that are not high-entropy enough for the
+# built-in generic-api-key rule (MinIO/S3 access+secret key pairs, JWT signing key).
+# ---------------------------------------------------------------------------
+[[rules]]
+id = "cmplus-service-credential"
+description = "S3/MinIO access or secret key, JWT signing key, client secret, or auth token"
+regex = '''(?i)(?:secret[_-]?key|access[_-]?key|signing[_-]?key|jwt[_-]?key|client[_-]?secret|auth[_-]?token|api[_-]?token)\s*[=:]\s*["']?([^\s;,"'<>{}$%?+][^\s;,"'<>{}]{7,})'''
+keywords = [
+  "secretkey", "secret_key", "secret-key",
+  "accesskey", "access_key", "access-key",
+  "signingkey", "signing_key", "signing-key",
+  "jwtkey", "jwt_key", "clientsecret", "client_secret",
+  "authtoken", "auth_token", "apitoken", "api_token",
+]
+
+  [rules.allowlist]
+  regexTarget = "match"
+  regexes = [
+    '''(?:\$\{|\$\(|\$[A-Za-z_]|%[A-Za-z_]+%|\{\{)''',
+    '''(?i)(?:ch4ngeme|change[-_]?me|replace[-_]?me|your[-_ ]?|placeholder|dummy|sample|example|redacted|<[^>]+>|x{4,}|\*{3,}|todo|tbd)''',
+    '''(?i):\s*(?:string|number|boolean|int|bool|guid|decimal|datetimeoffset)\s*[;,)\]]*$''',
+    # S2-SEC-01 false positive: `var signingKey = configuration["Jwt:SigningKey"]`
+    # (backend/src/CMPlus.WebApi/Program.cs) - the local variable name `signingKey` trips the
+    # keyword match, but the value being read is a config *lookup expression*, not a literal.
+    # The regex's own value-capture happens to cut off at the opening `[`/quote, so the "secret"
+    # it flags is the meaningless fragment `configuration[` - any match containing this substring
+    # is, by construction, a config read rather than a hardcoded value.
+    '''(?i)configuration\[''',
+  ]
+
+# ---------------------------------------------------------------------------
+# Global allowlist - paths only, deliberately minimal. Every entry here is a blind spot,
+# so anything added later needs a comment justifying why a secret cannot hide there.
+# ---------------------------------------------------------------------------
+[allowlist]
+description = "Machine-generated files with no human-authored credential content"
+paths = [
+  # Dependency lockfiles: integrity hashes (sha512-...) and registry URLs trip the
+  # entropy-based rules. Content is generated from the public npm/NuGet registries.
+  '''(?i)(^|/)package-lock\.json$''',
+  '''(?i)(^|/)packages\.lock\.json$''',
+]

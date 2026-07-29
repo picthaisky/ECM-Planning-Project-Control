@@ -1,0 +1,5 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Zero external dependencies by design (ADR-0001). Do not add PackageReference here. -->
+
+</Project>
