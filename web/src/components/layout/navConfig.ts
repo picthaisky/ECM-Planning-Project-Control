@@ -57,8 +57,11 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
 /** Screens with a real, working implementation so far. Every other nav entry still routes
  * (S4-FE-01 DoD: "build the shell/routing structure now so later sprints just add screen
  * content") but renders `ScreenPlaceholder` until its own sprint lands. `dashboard`/`cash` added
- * S8-FE-01/02 — `payment`/`weather`/`photo` (linked from Dashboard's KPI tiles/photo strip) are
- * deliberately *not* added yet: Sprint 9/12's backends they'd need don't exist. */
+ * S8-FE-01/02; `payment` added S9-FE-01/02 (the milestone list + certificate panel load against
+ * two endpoints that do not exist on the real backend yet — see `features/payment/api.ts`'s
+ * remarks — but every approval-chain mutation is real and live). `weather`/`photo` (linked from
+ * Dashboard's KPI tiles/photo strip) are deliberately *not* added yet: Sprint 11/12's backends
+ * they'd need don't exist. */
 export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
   'dashboard',
   'info',
@@ -66,4 +69,5 @@ export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
   'gantt',
   'evm',
   'cash',
+  'payment',
 ])

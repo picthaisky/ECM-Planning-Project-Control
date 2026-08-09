@@ -79,3 +79,22 @@ Rule: When asked to "restructure" or "reorganize" a repository, first scan the a
 structure. If physical separation already matches the request, reframe the task as "validate and
 wire the existing structure" instead of moving files. Report the existing layout and ask if the
 user means logical wiring, build config, or something else.
+
+## 2026-08-09 — UUIDv7 is time-ordered only to the millisecond; never sort by it for "newest first"
+Context: `ListPaymentCertificatesQuery` (Sprint 9 read-side) needed "newest first" ordering. The
+entity base uses `Guid.CreateVersion7()`, whose whole selling point is being time-ordered, so
+`OrderByDescending(c => c.Id)` looked like the obvious free win.
+What happened: `backend-developer` empirically probed it before trusting it and found ~80% of
+triples created in a tight loop came back in the wrong order under every comparison strategy tried.
+Root cause: UUIDv7's timestamp has **millisecond** resolution and .NET's `CreateVersion7()` adds no
+monotonic counter within a millisecond — the remaining bits are random. Anything created in the
+same millisecond (bulk import, seeding, a fast loop, a busy endpoint) sorts arbitrarily. The
+"time-ordered UUID" name promises more than the implementation delivers at sub-millisecond scale.
+Additional trap layered on top: sorting Guids **in SQL Server** uses `uniqueidentifier` collation,
+which does not compare bytes left-to-right, so pushing such an `OrderBy` to the database is wrong
+in a second, independent way.
+Rule: Never order by a UUIDv7 primary key to mean "creation order." Add an explicit `CreatedAt
+DateTimeOffset` column and sort on that (with the id as a deterministic tie-break if needed). If a
+Guid must be compared for ordering at all, do it client-side on the canonical hex form, never via
+SQL Server's `uniqueidentifier` collation. Applies to every entity in this codebase, since they all
+inherit `Entity`'s `Guid.CreateVersion7()` id.

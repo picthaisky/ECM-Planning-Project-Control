@@ -28,7 +28,7 @@ namespace CMPlus.Domain.Entities;
 /// <see cref="RevisionNo"/> distinguishes which submission a given rung belongs to, so more than one
 /// revision's steps can coexist historically for the same certificate row.</para>
 /// </summary>
-public sealed class PaymentCertificateApprovalStep : Entity, ITenantOwned
+public sealed class PaymentCertificateApprovalStep : Entity, ITenantOwned, INeverModified
 {
     public Guid TenantId { get; private set; }
 

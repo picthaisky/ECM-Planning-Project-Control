@@ -48,6 +48,19 @@ public sealed class AppendOnlyGuardInterceptor : SaveChangesInterceptor
                     $"is append-only and cannot be {entry.State}. Corrections must be a new compensating row, " +
                     "never an edit or delete (conventions.md).");
             }
+
+            // Narrower guarantee (S9-SEC-02 finding N-01): rows that may be added and cleared as a
+            // set, but never edited individually. `PaymentCertificateApprovalStep` is the case -
+            // ReturnForRevision/Withdraw legitimately clear the whole snapshot so a resubmission can
+            // re-resolve a fresh chain, but since the H-01 fix that snapshot is the *sole* record of
+            // who may approve which step, so editing one rung is a direct authority escalation.
+            if (entry.Entity is INeverModified && entry.State is EntityState.Modified)
+            {
+                throw new InvalidOperationException(
+                    $"{entry.Entity.GetType().Name} ('{entry.Property(nameof(CMPlus.Domain.Common.Entity.Id)).CurrentValue}') " +
+                    "cannot be modified in place. It may only be added, or removed as part of clearing " +
+                    "the whole set (e.g. ReturnForRevision voiding a chain snapshot).");
+            }
         }
     }
 }

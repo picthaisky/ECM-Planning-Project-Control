@@ -29,6 +29,22 @@ internal sealed class FakePaymentCertificateRepository : IPaymentCertificateRepo
         SaveCallCount++;
         return Task.FromResult(SaveShouldSucceed);
     }
+
+    public Task<IReadOnlyList<PaymentCertificate>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        // Ordinal string comparison, matching the real PaymentCertificateRepository's ordering
+        // exactly - see that type's remarks on why plain Guid.CompareTo (OrderByDescending(c => c.Id))
+        // does not reliably reflect UUIDv7 creation order.
+        IReadOnlyList<PaymentCertificate> rows = _certificates.Values
+            .Where(c => c.ProjectId == projectId)
+            .OrderByDescending(c => c.Id.ToString(), StringComparer.Ordinal)
+            .ToList();
+
+        return Task.FromResult(rows);
+    }
+
+    public Task<PaymentCertificate?> GetByIdAsync(Guid paymentCertificateId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(_certificates.GetValueOrDefault(paymentCertificateId));
 }
 
 internal sealed class FakeApprovalActionRepository : IApprovalActionRepository

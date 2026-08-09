@@ -1,4 +1,5 @@
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { useAuthStore } from '../../store/authStore'
 import { cx } from '../../utils/cx'
 
 export interface TopbarProps {
@@ -33,9 +34,16 @@ const QUICK_ACTIONS: QuickAction[] = [
  * client actually knows (the `:projectId` route param) — there is no `GET` project-detail
  * endpoint yet (see `store/projectStore.ts`'s remarks), so it deliberately does not fabricate a
  * project name/data-date the way the prototype's static mock does.
+ *
+ * S9-FE-03: also the Admin-only entry point into `/tenant-admin` (design.md §4: "a tenant-level
+ * entry point outside the 13-screen project nav") — a real, working link, deliberately styled and
+ * grouped apart from the disabled `QUICK_ACTIONS` placeholders so it never reads as "not
+ * implemented yet" the way they do. Not part of `Sidebar`'s per-project `NAV_ENTRIES` list on
+ * purpose: it navigates *away* from the current project entirely, to a tenant-wide screen.
  */
 export function Topbar({ pageTitle }: TopbarProps) {
   const { projectId } = useParams<{ projectId: string }>()
+  const isAdmin = useAuthStore((state) => state.claims?.role === 'Admin')
 
   return (
     <header className="flex flex-none items-center gap-3.5 border-b border-border bg-surface px-[22px] py-[13px]">
@@ -45,6 +53,17 @@ export function Topbar({ pageTitle }: TopbarProps) {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
+        {isAdmin && (
+          <>
+            <Link
+              to="/tenant-admin"
+              className="rounded-md border border-navy px-3 py-[5px] text-[11.5px] font-semibold text-navy hover:bg-navy hover:text-white"
+            >
+              ⚙ Tenant Admin
+            </Link>
+            <div className="h-5 w-px bg-border" aria-hidden="true" />
+          </>
+        )}
         {QUICK_ACTIONS.map((action) => (
           <span
             key={action.label}
