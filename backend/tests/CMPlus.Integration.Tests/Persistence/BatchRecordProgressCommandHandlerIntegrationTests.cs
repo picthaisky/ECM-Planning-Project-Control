@@ -28,6 +28,8 @@ public class BatchRecordProgressCommandHandlerIntegrationTests
     private sealed class FixedCurrentUserContext(Guid? userId) : ICurrentUserContext
     {
         public Guid? UserId { get; } = userId;
+
+        public UserRole Role => UserRole.PM;
     }
 
     private static (CmPlusDbContext Context, FakeTenantProvider TenantProvider) CreateContext(

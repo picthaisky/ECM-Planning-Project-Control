@@ -58,3 +58,17 @@ export interface BatchProgressRequest {
 export interface BatchProgressResult {
   entriesRecorded: number
 }
+
+/**
+ * `RecalculateCpmResultDto` (`RecalculateCpmCommand`, S5-BE-04) —
+ * `POST /api/v1/projects/{projectId}/cpm/recalculate` response body. `criticalPath` is every
+ * critical activity's `ActivityId`, already in the graph's own topological (schedule) order — see
+ * that DTO's own doc comment for the documented multi-chain simplification (one merged ordering,
+ * not separate chains per critical path, on a network with more than one disjoint critical chain).
+ */
+export interface RecalculateCpmResult {
+  activitiesProcessed: number
+  criticalActivityCount: number
+  projectDurationDays: number
+  criticalPath: string[]
+}

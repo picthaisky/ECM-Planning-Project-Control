@@ -73,4 +73,21 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         await using var context = new CmPlusDbContext(options, tenantContext);
         return await DevDataSeeder.SeedAsync(context, tenantContext, new Pbkdf2PasswordHasher());
     }
+
+    /// <summary>
+    /// A directly-constructed <see cref="CmPlusDbContext"/> against this same factory's InMemory
+    /// database, bound to a fixed <paramref name="tenantId"/> - the same "own <see cref="SeedTenantContext"/>,
+    /// never the DI-registered <c>HttpContextTenantProvider</c>" pattern <see cref="SeedAsync"/>
+    /// already uses. Needed for WebApi-level tests of an aggregate with no HTTP "create" endpoint
+    /// (e.g. <c>PaymentCertificate</c> - S9-BE-05 only builds the approval-chain transitions, not a
+    /// creation endpoint) - <c>DbContext</c> resolved from <see cref="WebApplicationFactory{TEntryPoint}.Services"/>
+    /// instead would use the real, HTTP-context-bound <c>ITenantProvider</c>, which throws outside
+    /// an authenticated request (by design, see that type's remarks).
+    /// </summary>
+    public CmPlusDbContext CreateDbContextForSeeding(Guid tenantId)
+    {
+        var tenantContext = new SeedTenantContext { TenantId = tenantId };
+        var options = new DbContextOptionsBuilder<CmPlusDbContext>().UseInMemoryDatabase(_databaseName).Options;
+        return new CmPlusDbContext(options, tenantContext);
+    }
 }

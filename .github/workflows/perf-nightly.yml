@@ -1,4 +1,4 @@
-name: Nightly WBS-tree perf
+name: Nightly perf (WBS-tree API + Gantt frontend)
 
 # S4-DO-01 (docs/10. Sprint 4, devops-engineer row; DoD: "รันทุกคืนบนชุดข้อมูลใหญ่ + เก็บ trend;
 # ถดถอยเกินเกณฑ์ -> แจ้งเตือน"). Companion to S4-QA-01/S4-DB-02's tests/perf/wbs-tree.k6.js +
@@ -23,6 +23,20 @@ name: Nightly WBS-tree perf
 # absolute P95 numbers this job produces are its OWN baseline, established the first night it
 # runs, not expected to match either of those other environments (docs/perf/baseline.md section
 # 6 says exactly this about a "dedicated CI runner" measurement).
+#
+# S6-DO-01 (docs/10. Sprint 6, devops-engineer row; DoD: "รันอัตโนมัติ + เก็บ trend เฟรมเรต" - run
+# automatically + track frame-rate trend) added a second job, `perf-nightly-frontend`, to this same
+# file rather than a second workflow file - same schedule trigger, same trend-branch mechanism,
+# same gate-step-at-the-end shape as the job above, just measuring a different real thing (real-
+# browser Gantt scroll frame rate, web/e2e/gantt-perf.spec.ts / S6-QA-01) instead of k6/HTTP
+# latency. See that job's own header comment for what's specific to it (frame-rate direction
+# handling, the nginx-vs-Vite-dev-server call, why its aggregator is a sibling script rather than
+# an extension of aggregate-and-check.py). The two jobs run sequentially
+# (`perf-nightly-frontend` declares `needs: [perf-nightly]`), not in parallel - see that job's
+# comment for why (both jobs push to the same `perf-trend` branch; running them concurrently would
+# race two pushes within a single workflow run, a different hazard than the cross-*run* race the
+# `concurrency:` block below already prevents). `perf-nightly-gate` at the bottom of this file rolls
+# both jobs' pass/fail into one overall result, mirroring `ci.yml`'s own `ci-required` job.
 
 on:
   schedule:
@@ -48,9 +62,17 @@ on:
         required: false
         default: '100'
       regression_multiplier:
-        description: 'Trend-regression trigger: median P95 > this x rolling baseline'
+        description: 'Trend-regression trigger, shared by both jobs below: perf-nightly (latency) flags median P95 > baseline x this; perf-nightly-frontend (frame rate) flags median avgFps < baseline / this - reciprocal, not the same op with the comparison flipped'
         required: false
         default: '1.25'
+      frontend_runs:
+        description: 'Number of gantt-perf.spec.ts (S6-QA-01) Playwright runs to aggregate (median-of-N)'
+        required: false
+        default: '10'
+      fps_threshold:
+        description: 'Hard frame-rate floor in fps (docs/10 S6-QA-01 DoD; matches gantt-perf.spec.ts GANTT_PERF_FPS_THRESHOLD default)'
+        required: false
+        default: '30'
 
 # Only one perf run at a time - a second overlapping run racing the first for the same
 # `perf-trend` branch push (see the trend-append step) would risk a lost update. Queue rather
@@ -66,6 +88,7 @@ env:
   DOTNET_VERSION: '10.0.x'
   DOTNET_NOLOGO: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+  NODE_VERSION: '22' # same value as ci.yml's NODE_VERSION - only perf-nightly-frontend uses this
   COMPOSE_PROJECT_NAME: cmplus-perf
   # Ephemeral, job-scoped container credentials - identical reasoning to ci.yml's
   # `migration-smoke` job: these containers never persist beyond this job (no volume survives
@@ -349,3 +372,413 @@ jobs:
         if: always()
         working-directory: infra/docker
         run: docker compose -f docker-compose.yml --env-file .env.ci down -v || true
+
+  # =============================================================================================
+  # S6-DO-01 (docs/10. Sprint 6, devops-engineer row; US-6.2; DoD: "รันอัตโนมัติ + เก็บ trend
+  # เฟรมเรต" - run automatically + track frame-rate trend). Companion to S6-QA-01's
+  # web/e2e/gantt-perf.spec.ts (real-browser, real-backend, 30s continuous scroll of the real
+  # S4-DB-02 10,000-activity dataset, `requestAnimationFrame`-sampled frame rate) and
+  # web/playwright.config.ts (both already shipped this sprint - this job wires them into CI, it
+  # does not author them).
+  #
+  # Structure deliberately mirrors `perf-nightly` above stage-for-stage (stack bring-up, N
+  # repeated real runs each fail-soft via `|| true`, median-of-N aggregation, hard-floor + rolling-
+  # trend-regression gate, trend persisted to the shared `perf-trend` branch, alert issue on a red
+  # verdict, a final unconditional Gate step) rather than inventing a parallel mechanism, per this
+  # task's own instruction to reuse the established pattern.
+  #
+  # Runs sequentially after `perf-nightly` (`needs:` below), not in parallel with it, for two
+  # independent reasons:
+  #   1. Both jobs push a commit to the same orphan `perf-trend` branch near the end of their run.
+  #      The existing `concurrency:` block at the top of this file only prevents two *overlapping
+  #      workflow runs* (e.g. two different nights) from racing that push - it does nothing for two
+  #      *jobs within the same run* pushing around the same time, which parallel jobs would do.
+  #      Ordering them is the simplest fix that needs no retry/rebase-on-conflict logic added to a
+  #      script this sprint's Docker outage means could not be rehearsed end-to-end.
+  #   2. Both jobs also happen to bind the same host ports (API_HOST_PORT/MSSQL_HOST_PORT) for
+  #      their own independent stack - harmless on GitHub-hosted runners (each job gets its own
+  #      fresh VM) but would collide if this ever moved to a shared/self-hosted runner; sequencing
+  #      removes that risk too, for free.
+  # `if: !cancelled()` (not the default) so this job still runs and still records tonight's frame-
+  # rate trend point even if `perf-nightly`'s own verdict was red - the two metrics are independent
+  # and a bad WBS-tree API night should not create a *gap* in the frame-rate trend.
+  #
+  # Dataset note: this job seeds the same deterministic S4-DB-02 project gantt-perf.spec.ts targets
+  # (PERF_PROJECT_ID, web/e2e/support/gantt.ts) but, like the spec itself, does not invoke
+  # `POST /api/v1/projects/{id}/cpm/recalculate` first - IsCritical stays `false`/TotalFloat/
+  # FreeFloat stay NULL for every activity (tests/perf/seed-large-project.sql's own documented
+  # scope note), unlike the one-time manual measurement in docs/perf/gantt-frontend-s6.md whose dev
+  # volume had CPM already run against it from earlier session history. This is a real, deliberate
+  # difference from that manual measurement, called out here rather than silently papered over -
+  # it does not affect the frame-rate DoD (canvas fill-color choice is not the cost driver of a
+  # scroll redraw) and exactly matches what the committed spec's own setup does today; if a future
+  # sprint wants "real" criticality mix in the nightly measurement too, add the recalculate call to
+  # web/e2e/support/gantt.ts (QA's artifact), not silently inside this workflow.
+  # =============================================================================================
+  perf-nightly-frontend:
+    name: Nightly Gantt frame-rate perf (real browser, real stack, N=Playwright runs, aggregated + trended)
+    needs: [perf-nightly]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 75 # generous vs perf-nightly's 60: browser install + N real 30s scroll runs (not fast HTTP hits) cost real wall-clock time
+    permissions:
+      contents: write # only this job needs it, to append/push the `perf-trend` branch
+      issues: write   # only used on a regression, to open/update the alert issue
+    env:
+      N_RUNS: ${{ github.event.inputs.frontend_runs || '10' }}
+      FPS_THRESHOLD: ${{ github.event.inputs.fps_threshold || '30' }}
+      REGRESSION_MULTIPLIER: ${{ github.event.inputs.regression_multiplier || '1.25' }}
+      RUN_TRIGGER: ${{ github.event_name }}
+      RESULTS_DIR: ${{ github.workspace }}/tests/perf/results
+      # Distinct from perf-nightly's own `cmplus-perf` - harmless given separate runners (see
+      # header comment above), kept distinct anyway so container names in this job's own logs are
+      # never confused with the other job's.
+      COMPOSE_PROJECT_NAME: cmplus-perf-web
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Same cache key convention as perf-nightly's own NuGet cache - only needed here to build and
+      # run MigrationAndSeedSmokeTests (same reason as that job).
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      # Caches Chromium's own binary download (the slow part - ~100-300MB); `--with-deps` below
+      # still runs every time regardless of cache hit, since the apt-installed OS-level shared
+      # libraries it also installs are never covered by this (or any actions/cache) cache on a
+      # fresh-VM-per-job GitHub-hosted runner.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright browsers (chromium only - the only project playwright.config.ts defines)
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      # ---------------------------------------------------------------------------------------
+      # 1. Stand up the real stack - identical shape to perf-nightly's own step of the same name
+      #    (mssql + minio + api; `web` is not started, see the nginx-vs-Vite-dev-server note
+      #    below). Necessarily duplicated rather than shared across jobs: a GitHub-hosted runner is
+      #    a fresh VM per job, so there is no live stack from the job above to reuse here even
+      #    though it ran first.
+      # ---------------------------------------------------------------------------------------
+      - name: Write ephemeral compose .env
+        working-directory: infra/docker
+        run: |
+          set -euo pipefail
+          cat > .env.ci <<EOF
+          ASPNETCORE_ENVIRONMENT=Production
+          API_HOST_PORT=${API_HOST_PORT}
+          JWT_SIGNING_KEY=${JWT_SIGNING_KEY}
+          JWT_ISSUER=CMPlus
+          JWT_AUDIENCE=CMPlusClients
+          JWT_EXPIRY_MINUTES=60
+          MSSQL_PID=Developer
+          MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD}
+          MSSQL_APP_DB=${MSSQL_APP_DB}
+          MSSQL_APP_USER=${MSSQL_APP_USER}
+          MSSQL_APP_PASSWORD=${MSSQL_APP_PASSWORD}
+          MSSQL_HOST_PORT=${MSSQL_HOST_PORT}
+          MINIO_ROOT_USER=${MINIO_ROOT_USER}
+          MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+          MINIO_BUCKET=cmplus-files
+          MINIO_API_HOST_PORT=9000
+          MINIO_CONSOLE_HOST_PORT=9001
+          IMAGE_TAG=perf-nightly-frontend
+          EOF
+
+      - name: Build and start api + mssql + minio
+        working-directory: infra/docker
+        run: |
+          docker compose -f docker-compose.yml --env-file .env.ci up -d --build mssql minio api
+
+      - name: Wait for api to become healthy
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' cmplus-perf-web-api-1 2>/dev/null || echo "starting")
+            echo "attempt $i: $status"
+            if [ "$status" = "healthy" ]; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::api container did not become healthy in time"
+          docker logs cmplus-perf-web-api-1 || true
+          exit 1
+
+      - name: Restore + build backend (needed to run the migration/seed smoke test below)
+        run: |
+          dotnet restore backend/CMPlus.sln
+          dotnet build backend/CMPlus.sln --configuration Release --no-restore
+
+      - name: Apply migrations + seed dev tenant
+        env:
+          CMPLUS_TEST_MSSQL_CONNECTION: "Server=127.0.0.1,${{ env.MSSQL_HOST_PORT }};Database=${{ env.MSSQL_APP_DB }};User Id=${{ env.MSSQL_APP_USER }};Password=${{ env.MSSQL_APP_PASSWORD }};TrustServerCertificate=True;"
+        run: |
+          dotnet test backend/CMPlus.sln --configuration Release --no-build \
+            --filter "FullyQualifiedName~MigrationAndSeedSmokeTests"
+
+      - name: Load large perf dataset
+        run: |
+          docker exec -i cmplus-perf-web-mssql-1 /opt/mssql-tools18/bin/sqlcmd \
+            -S localhost -U sa -P "${MSSQL_SA_PASSWORD}" -C -N -d "${MSSQL_APP_DB}" -b \
+            < tests/perf/seed-large-project.sql
+
+      # ---------------------------------------------------------------------------------------
+      # 2. Run the real Playwright spec N times against the real stack (default 10 - same order of
+      #    magnitude as perf-nightly's own default, for the same "comparable sample size" reasoning
+      #    - there is no pre-existing multi-run frame-rate characterization to match yet, unlike
+      #    docs/perf/baseline.md's 11-run latency characterization; this job's own first several
+      #    nights ARE that characterization, the same way perf-nightly's own header comment says a
+      #    GitHub-hosted runner's *latency* baseline is "established the first night it runs").
+      #
+      #    Each invocation drives playwright.config.ts's own `webServer` block (`npm run dev
+      #    -- --port 5173 --strictPort`), which Playwright starts before the test and stops after -
+      #    `reuseExistingServer: !process.env.CI` evaluates to `false` here (GitHub Actions always
+      #    sets `CI=true`), so each of the N runs gets a fresh Vite dev server, not one shared
+      #    server reused across iterations. That costs a few seconds of Vite startup per run; kept
+      #    as-is rather than restructuring to a single shared server, so this job needs no change
+      #    to playwright.config.ts (qa-engineer's artifact, out of this task's scope) to work.
+      #
+      #    NGINX-VS-VITE-DEV-SERVER DECISION (S6-DO-01's own call, per this sprint's task): use the
+      #    Vite dev server, exactly as playwright.config.ts already does, NOT the `web` nginx
+      #    container. `infra/docker/web.nginx.conf` has no `/api` reverse-proxy `location` block,
+      #    so a browser loading the built SPA from the `web` container cannot reach the API at all
+      #    today (qa-engineer verified this directly this sprint: `POST /api/v1/auth/login` against
+      #    the nginx container returns a bare `405`, not an auth response - see
+      #    web/playwright.config.ts's own header comment and this sprint's QA report). Fixing that
+      #    gap was in scope for this task to *decide on*, and was deliberately NOT done here:
+      #      - `infra/docker/web.nginx.conf` is the exact file the real production image serves
+      #        from (built by `infra/docker/web.Dockerfile`, pushed to GHCR by ci.yml's `images`
+      #        job on every merge to main) - a proxy-rule change there is a production-behavior
+      #        change, not a test-only config, and this project's standing rule is no deploy/no
+      #        production-affecting change without human approval and real verification. This
+      #        sprint's Docker outage means the change could not be built and exercised against a
+      #        real container end-to-end before landing it - shipping an unverified change to the
+      #        file that fronts real production traffic is a worse risk than the Vite/nginx
+      #        delivery-path mismatch below.
+      #      - Even verified, switching to nginx would change WHAT is measured, not just HOW: Vite
+      #        dev serves an unminified, uncompressed, unbundled module graph over
+      #        native ESM (many small requests, no gzip/Brotli, no long-lived hashed-asset caching),
+      #        while nginx serves the real minified/bundled/content-hashed production build. Static
+      #        asset delivery shape is not what S6-QA-01's frame-rate metric is measuring (that is
+      #        rAF cadence during canvas redraw, after the app has already loaded), but initial
+      #        page load time and any lazy-chunk fetch mid-scroll would differ - a real, separate
+      #        perf question, better scoped as its own follow-up once the nginx `/api` gap is fixed
+      #        and verified in isolation, not bundled unverified into this task.
+      #    Net effect: this nightly job measures the same thing web/e2e/gantt-perf.spec.ts already
+      #    measures today (real backend, real 10,000-activity payload, real canvas rendering, Vite-
+      #    served bundle) - it is a faithful automation of the existing spec, not a new environment.
+      #    The nginx `/api` proxy gap remains open and is flagged back to `system-architect` /
+      #    tracked for a future sprint; it should be fixed (production itself needs a working `/api`
+      #    path regardless of this test suite) but as its own reviewed, Docker-verified change.
+      # ---------------------------------------------------------------------------------------
+      - name: Run gantt-perf.spec.ts (S6-QA-01) N times against the real stack
+        working-directory: web
+        env:
+          # Read by vite.config.ts's loadEnv(mode, cwd, '') inside the Vite dev server Playwright's
+          # webServer block spawns as a child process (inherits this step's env). Set explicitly
+          # rather than relying on vite.config.ts's own http://localhost:5000 default coincidentally
+          # matching API_HOST_PORT's own default - same step-env-referencing-workflow-env pattern
+          # already proven above in "Apply migrations + seed dev tenant".
+          API_PROXY_TARGET: "http://localhost:${{ env.API_HOST_PORT }}"
+        run: |
+          set -euo pipefail
+          mkdir -p "${RESULTS_DIR}"
+          for i in $(seq 1 "${N_RUNS}"); do
+            echo "=== gantt-perf.spec.ts run ${i}/${N_RUNS} ==="
+            npm run test:e2e:perf > "${RESULTS_DIR}/gantt-perf.result.run-${i}.log" 2>&1 || true
+            tail -n 6 "${RESULTS_DIR}/gantt-perf.result.run-${i}.log"
+          done
+
+      # ---------------------------------------------------------------------------------------
+      # 3. Aggregate (median-of-N avgFps) and check both the hard 30fps floor and a rolling trend
+      #    baseline - see tests/perf/aggregate-and-check-fps.py's own docstring for the full
+      #    statistic definitions and, in particular, why the trend-regression comparison is a
+      #    reciprocal (baseline / multiplier) rather than the latency script's multiplication.
+      #    Same "this step's exit code is not the job's pass/fail signal" rule as perf-nightly -
+      #    trend-append/artifact-upload/issue-alert must all still run on a red result.
+      # ---------------------------------------------------------------------------------------
+      - name: Fetch the perf-trend branch (the perf-nightly job above creates it on a from-scratch first run)
+        run: |
+          set -euo pipefail
+          git config user.name "cmplus-perf-bot"
+          git config user.email "cmplus-perf-bot@users.noreply.github.com"
+          mkdir -p "${GITHUB_WORKSPACE}/perf-trend-data"
+          if ! git ls-remote --exit-code --heads origin perf-trend >/dev/null 2>&1; then
+            echo "::error::perf-trend branch does not exist yet. The perf-nightly job (this job's"
+            echo "::error::own 'needs:') always runs first and creates it on a from-scratch first"
+            echo "::error::run - if it is genuinely still missing here, perf-nightly itself must"
+            echo "::error::have failed before reaching its own branch-init step. Check that job's"
+            echo "::error::logs, not this one, to diagnose."
+            exit 1
+          fi
+          git clone --branch perf-trend --single-branch --depth 50 \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            perf-trend-data
+          # gantt-fps-trend.csv is this job's own file on the shared perf-trend branch - it may not
+          # exist yet even though the branch does (the first night this metric is added to an
+          # already-existing branch). trend.csv (the latency metric's own file) is left untouched.
+          if [ ! -f perf-trend-data/gantt-fps-trend.csv ]; then
+            printf 'date,trigger,commit_sha,n_runs,median_avg_fps,min_avg_fps,max_avg_fps,mean_avg_fps,median_p95_frame_delta_ms,max_long_task_count,pass_count,fail_count,rolling_baseline_avg_fps,hard_breach,trend_regression,verdict,run_url\n' \
+              > perf-trend-data/gantt-fps-trend.csv
+            (
+              cd perf-trend-data
+              git add gantt-fps-trend.csv
+              git commit -m "chore(perf): initialize gantt-fps-trend.csv"
+            )
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Aggregate Gantt frame-rate results + check hard floor and trend regression
+        id: aggregate
+        run: |
+          python3 tests/perf/aggregate-and-check-fps.py
+        env:
+          RESULTS_DIR: ${{ env.RESULTS_DIR }}
+          TREND_CSV_PATH: ${{ github.workspace }}/perf-trend-data/gantt-fps-trend.csv
+          HARD_THRESHOLD_FPS: ${{ env.FPS_THRESHOLD }}
+          REGRESSION_MULTIPLIER: ${{ env.REGRESSION_MULTIPLIER }}
+          # RUN_DATE_UTC deliberately left unset, same reasoning as perf-nightly's own step.
+          RUN_TRIGGER: ${{ env.RUN_TRIGGER }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          OUTPUT_JSON_PATH: ${{ env.RESULTS_DIR }}/aggregate-fps.json
+          NEW_TREND_ROW_PATH: ${{ github.workspace }}/perf-trend-data/new-fps-trend-row.csv
+
+      # ---------------------------------------------------------------------------------------
+      # 4. Persist the trend ("เก็บ trend เฟรมเรต" DoD) - appended regardless of PASS/FAIL, into
+      #    gantt-fps-trend.csv specifically (trend.csv, the latency file, is never touched by this
+      #    job). Same dedicated-orphan-branch reasoning as perf-nightly: this is an automated
+      #    telemetry commit, never subject to branch-protection/PR review.
+      # ---------------------------------------------------------------------------------------
+      - name: Append today's row to gantt-fps-trend.csv on the perf-trend branch
+        if: always() && steps.aggregate.outcome == 'success'
+        run: |
+          set -euo pipefail
+          cd perf-trend-data
+          cat new-fps-trend-row.csv >> gantt-fps-trend.csv
+          rm -f new-fps-trend-row.csv
+          git add gantt-fps-trend.csv
+          git commit -m "perf(nightly): $(date -u +%F) median avgFps=${{ steps.aggregate.outputs.median_avg_fps }} (n=${N_RUNS}, trigger=${RUN_TRIGGER}, verdict=${{ steps.aggregate.outputs.verdict }})"
+          git push origin perf-trend
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload raw + aggregate frame-rate results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-nightly-frontend-results-${{ github.run_id }}
+          path: tests/perf/results/
+          retention-days: 14
+
+      # Best-effort debugging aid only: Playwright overwrites web/test-results and
+      # web/playwright-report on every invocation, so only the LAST of the N loop iterations
+      # survives here - unlike the per-run log capture above (the durable, complete record of
+      # every run's own measurement), this artifact does not cover earlier iterations. `trace:
+      # retain-on-failure` / `screenshot: only-on-failure` (playwright.config.ts) mean these
+      # directories are typically near-empty on an all-green last run.
+      - name: Upload last-run Playwright report (best-effort; only the final iteration survives)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-nightly-frontend-playwright-report-${{ github.run_id }}
+          path: |
+            web/playwright-report/
+            web/test-results/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # ---------------------------------------------------------------------------------------
+      # 5. Alert ("ถดถอยเกินเกณฑ์ -> แจ้งเตือน" DoD carried over from S4-DO-01, applied to this
+      #    metric too) - a distinct issue (own title marker) from perf-nightly's own alert, so the
+      #    two metrics never get conflated in one thread.
+      # ---------------------------------------------------------------------------------------
+      - name: Open or update the Gantt frame-rate perf-regression alert issue
+        if: always() && steps.aggregate.outcome == 'success' && steps.aggregate.outputs.verdict != 'PASS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TITLE="[perf-nightly] Gantt frame-rate regression (S6-DO-01)"
+          BODY="Verdict: **${{ steps.aggregate.outputs.verdict }}** on $(date -u +%F).
+          Median-of-${N_RUNS} avgFps: ${{ steps.aggregate.outputs.median_avg_fps }} fps (hard floor ${FPS_THRESHOLD} fps).
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}
+          Trend: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/perf-trend/gantt-fps-trend.csv
+          See web/e2e/gantt-perf.spec.ts (S6-QA-01) and docs/perf/baseline.md for the documented methodology/noise-reporting standard this job follows."
+
+          existing=$(gh issue list --search "in:title \"${TITLE}\"" --state open --json number --jq '.[0].number' || echo "")
+          if [ -n "${existing}" ] && [ "${existing}" != "null" ]; then
+            gh issue comment "${existing}" --body "${BODY}"
+          else
+            gh issue create --title "${TITLE}" --body "${BODY}"
+          fi
+
+      # ---------------------------------------------------------------------------------------
+      # 6. Final gate - the only step whose exit code determines this job's pass/fail, same
+      #    reasoning/ordering as perf-nightly's own Gate step.
+      # ---------------------------------------------------------------------------------------
+      - name: Gate - fail the run if today's frame-rate verdict is not PASS
+        if: always()
+        run: |
+          verdict="${{ steps.aggregate.outputs.verdict }}"
+          if [ -z "${verdict}" ]; then
+            echo "::error::Aggregation step never produced a verdict - treat as an infra failure."
+            exit 1
+          fi
+          if [ "${verdict}" != "PASS" ]; then
+            echo "::error::Nightly Gantt frame-rate perf verdict is ${verdict} - see the job summary and the perf-regression issue."
+            exit 1
+          fi
+          echo "Verdict: PASS"
+
+      - name: Tear down the stack
+        if: always()
+        working-directory: infra/docker
+        run: docker compose -f docker-compose.yml --env-file .env.ci down -v || true
+
+  # Single overall status for "did last night's perf run pass, across both metrics" - the same
+  # pattern ci.yml already established with its own `ci-required` job. Each job above already
+  # fails itself (its own final Gate step) when ITS OWN metric verdict isn't PASS; this job only
+  # rolls both results up into one place, so a human glancing at the workflow run (or a future
+  # branch-protection rule, if this workflow is ever wired into one) has a single result to read
+  # instead of two.
+  perf-nightly-gate:
+    name: Nightly perf - overall gate
+    if: always()
+    needs: [perf-nightly, perf-nightly-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if either nightly perf job did not succeed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "::error::At least one nightly perf job did not pass - see perf-nightly and/or perf-nightly-frontend above."
+            exit 1
+          fi
+          echo "Both nightly perf jobs passed."

@@ -36,7 +36,7 @@ namespace CMPlus.Application.Approval;
 public sealed class ApprovalRoutingService : IApprovalRoutingService
 {
     private static readonly IReadOnlyList<ApprovalChainStep> FallbackChain =
-        [new ApprovalChainStep(StepNo: 1, RequiredRole: UserRole.ProjectDirector, QuorumCount: 1)];
+        [new ApprovalChainStep(FallbackApprovalChain.StepNo, FallbackApprovalChain.RequiredRole, QuorumCount: 1)];
 
     public Result<ApprovalChainResolution> Resolve(ApprovalRoutingRequest request)
     {
@@ -49,7 +49,7 @@ public sealed class ApprovalRoutingService : IApprovalRoutingService
         if (policy is null)
         {
             return Result<ApprovalChainResolution>.Success(new ApprovalChainResolution(
-                routingAmount, Guid.Empty, 0, FallbackChain, EscalationApplied: false));
+                routingAmount, Guid.Empty, 0, FallbackChain, EscalationApplied: false, AllowSelfApproval: false));
         }
 
         List<ApprovalChainStep> chain = policy.Rules
@@ -82,7 +82,7 @@ public sealed class ApprovalRoutingService : IApprovalRoutingService
         }
 
         return Result<ApprovalChainResolution>.Success(new ApprovalChainResolution(
-            routingAmount, policy.Id, policy.Version, chain, escalationApplied));
+            routingAmount, policy.Id, policy.Version, chain, escalationApplied, policy.AllowSelfApproval));
     }
 
     private static ApprovalPolicy? SelectPolicy(

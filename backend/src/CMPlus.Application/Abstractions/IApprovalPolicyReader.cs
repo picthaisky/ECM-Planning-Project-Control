@@ -27,4 +27,24 @@ public interface IApprovalPolicyReader
     Task<ApprovalPolicy?> GetActiveTenantDefaultPolicyAsync(
         ApprovalDocumentType documentType,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Fetches one specific policy <b>version</b> by <see cref="CMPlus.Domain.Common.Entity.Id"/>,
+    /// regardless of <see cref="ApprovalPolicy.IsActive"/>/<see cref="ApprovalPolicy.EffectiveTo"/>
+    /// (S9-BE-05). This is the concrete mechanism that makes version-pinning
+    /// (ADR-0008/approval-workflow.md §5.2) actually protect an in-flight document: a
+    /// <c>PaymentCertificate</c>/<c>VariationOrder</c> pins <c>ApprovalPolicyId</c> at Submit time,
+    /// and re-deriving "what role does chain step N require" while the document is
+    /// <c>PendingApproval</c> must always resolve against that exact pinned version - never the
+    /// tenant's currently-active one, which a S9-BE-06 policy edit may have since superseded
+    /// (deactivated, but never deleted: <see cref="ApprovalPolicy.Deactivate"/> only flips
+    /// <see cref="ApprovalPolicy.IsActive"/>/stamps <see cref="ApprovalPolicy.EffectiveTo"/>, so the
+    /// row - and this lookup - remains valid for as long as any document still references it).
+    /// <see cref="GetActiveTenantDefaultPolicyAsync"/> is deliberately unsuitable for this: it
+    /// filters to <c>IsActive</c>, so it would silently start returning the *new* version's rules
+    /// for an already-in-flight document the moment an admin edits the policy.
+    /// </summary>
+    Task<ApprovalPolicy?> GetByIdAsync(
+        Guid approvalPolicyId,
+        CancellationToken cancellationToken = default);
 }

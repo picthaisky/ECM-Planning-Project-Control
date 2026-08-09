@@ -1,9 +1,9 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import type { InternalAxiosRequestConfig } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { batchRecordProgress, getNodeActivities, getWbsTree, WbsApiError } from './api'
+import { batchRecordProgress, getNodeActivities, getWbsTree, recalculateCpm, WbsApiError } from './api'
 import { apiClient } from '../../services/apiClient'
-import type { WbsTreeDto } from './types'
+import type { RecalculateCpmResult, WbsTreeDto } from './types'
 
 vi.mock('../../services/apiClient', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -161,6 +161,106 @@ describe('features/wbs/api', () => {
       await expect(
         batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }),
       ).rejects.toMatchObject({
+        name: 'WbsApiError',
+        message: 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
+        status: undefined,
+      })
+    })
+  })
+
+  describe('recalculateCpm (S5-BE-04)', () => {
+    it('posts to the real recalculate endpoint and returns the critical path in schedule order', async () => {
+      const sampleResult: RecalculateCpmResult = {
+        activitiesProcessed: 4,
+        criticalActivityCount: 3,
+        projectDurationDays: 15,
+        criticalPath: ['activity-a', 'activity-c', 'activity-d'],
+      }
+      vi.mocked(apiClient.post).mockResolvedValueOnce({ data: sampleResult })
+
+      const result = await recalculateCpm('project-1')
+
+      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/cpm/recalculate')
+      expect(result).toEqual(sampleResult)
+    })
+
+    it('translates CpmProjectNotFound to the same Thai message as the other "project not found" codes', async () => {
+      vi.mocked(apiClient.post).mockRejectedValueOnce(
+        makeError(404, {
+          type: 'https://cmplus.dev/problems/not-found',
+          detail: 'CpmProjectNotFound',
+        }),
+      )
+
+      await expect(recalculateCpm('missing')).rejects.toMatchObject({
+        name: 'WbsApiError',
+        message: 'ไม่พบโครงการที่ระบุ',
+        status: 404,
+      })
+    })
+
+    it('translates CpmDuplicateRelation (S5-BE-03) to a Thai error naming Activity Relation', async () => {
+      vi.mocked(apiClient.post).mockRejectedValueOnce(
+        makeError(422, {
+          type: 'https://cmplus.dev/problems/cpm-duplicate-relation',
+          detail: 'CpmDuplicateRelation',
+        }),
+      )
+
+      await expect(recalculateCpm('project-1')).rejects.toMatchObject({
+        message: expect.stringContaining('Activity Relation'),
+        status: 422,
+      })
+    })
+
+    it('translates CpmUnknownActivityInRelation to a Thai error', async () => {
+      vi.mocked(apiClient.post).mockRejectedValueOnce(
+        makeError(422, {
+          type: 'https://cmplus.dev/problems/cpm-unknown-activity',
+          detail: 'CpmUnknownActivityInRelation',
+        }),
+      )
+
+      await expect(recalculateCpm('project-1')).rejects.toMatchObject({
+        message: expect.stringContaining('นอกโครงการนี้'),
+        status: 422,
+      })
+    })
+
+    // Verified against the real backend shape (ResultProblemMapper's remarks + CpmEngine.Calculate):
+    // a rejected cycle's `ProblemDetails.detail` is the dynamic string
+    // "CpmCycleDetected: A -> B -> A" (the code plus the offending chain, joined by " -> ") — never
+    // an exact, stable dictionary key. The frontend must show the actual chain, not discard it.
+    it('translates a CpmCycleDetected rejection into a Thai message that still shows the offending chain', async () => {
+      vi.mocked(apiClient.post).mockRejectedValueOnce(
+        makeError(422, {
+          type: 'https://cmplus.dev/problems/cpm-cycle-detected',
+          title: 'The activity relation graph contains a cycle and cannot be scheduled.',
+          detail:
+            'CpmCycleDetected: 11111111-1111-1111-1111-111111111111 -> 22222222-2222-2222-2222-222222222222 -> 11111111-1111-1111-1111-111111111111',
+        }),
+      )
+
+      let caught: unknown
+      try {
+        await recalculateCpm('project-1')
+      } catch (err) {
+        caught = err
+      }
+
+      expect(caught).toMatchObject({ name: 'WbsApiError', status: 422 })
+      expect((caught as WbsApiError).message).toContain('วนซ้ำ')
+      expect((caught as WbsApiError).message).toContain(
+        '11111111-1111-1111-1111-111111111111 → 22222222-2222-2222-2222-222222222222',
+      )
+    })
+
+    it('a genuine network failure becomes the generic Thai error', async () => {
+      const config = makeConfig('/projects/project-1/cpm/recalculate')
+      const networkError = new AxiosError('Network Error', 'ERR_NETWORK', config, undefined, undefined)
+      vi.mocked(apiClient.post).mockRejectedValueOnce(networkError)
+
+      await expect(recalculateCpm('project-1')).rejects.toMatchObject({
         name: 'WbsApiError',
         message: 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',
         status: undefined,

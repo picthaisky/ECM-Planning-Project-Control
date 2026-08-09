@@ -172,6 +172,111 @@ namespace CMPlus.Infrastructure.Migrations
                     b.ToTable("ActivityRelations", (string)null);
                 });
 
+            modelBuilder.Entity("CMPlus.Domain.Entities.ActualCostEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ActivityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("CostCategory")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CostCode")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("DocumentReference")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("EntryType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("FileImportJobId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("IncurredDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("PaidDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("PostedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("PostedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Quantity")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid?>("ReversesEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("UnitOfMeasure")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("VendorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("WbsNodeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActivityId");
+
+                    b.HasIndex("FileImportJobId");
+
+                    b.HasIndex("ReversesEntryId");
+
+                    b.HasIndex("WbsNodeId");
+
+                    b.HasIndex("TenantId", "ActivityId", "IncurredDate")
+                        .HasFilter("[ActivityId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "ProjectId", "IncurredDate");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("TenantId", "ProjectId", "IncurredDate"), new[] { "Amount" });
+
+                    b.HasIndex("TenantId", "WbsNodeId", "IncurredDate");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("TenantId", "WbsNodeId", "IncurredDate"), new[] { "Amount" });
+
+                    b.HasIndex("TenantId", "ProjectId", "CostCategory", "IncurredDate");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("TenantId", "ProjectId", "CostCategory", "IncurredDate"), new[] { "Amount" });
+
+                    b.ToTable("ActualCostEntries", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ActualCostEntries_Amount_NotZero", "[Amount] <> 0");
+
+                            t.HasCheckConstraint("CK_ActualCostEntries_Quantity", "[Quantity] IS NULL OR [Quantity] >= 0");
+                        });
+                });
+
             modelBuilder.Entity("CMPlus.Domain.Entities.ApprovalAction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -417,6 +522,76 @@ namespace CMPlus.Infrastructure.Migrations
                     b.ToTable("CalendarExceptions", (string)null);
                 });
 
+            modelBuilder.Entity("CMPlus.Domain.Entities.EvmPeriodSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Ac")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Bac")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("DataDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal?>("Eac")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("EacVariant")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("Etc")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("Ev")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("PerformanceFactor")
+                        .HasPrecision(9, 6)
+                        .HasColumnType("decimal(9,6)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Pv")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("Vac")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProjectId", "DataDate")
+                        .IsUnique();
+
+                    b.ToTable("EvmPeriodSnapshots", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_EvmPeriodSnapshots_Bac", "[Bac] >= 0");
+
+                            t.HasCheckConstraint("CK_EvmPeriodSnapshots_Ev", "[Ev] >= 0");
+
+                            t.HasCheckConstraint("CK_EvmPeriodSnapshots_Pv", "[Pv] >= 0");
+                        });
+                });
+
             modelBuilder.Entity("CMPlus.Domain.Entities.FileImportJob", b =>
                 {
                     b.Property<Guid>("Id")
@@ -464,6 +639,159 @@ namespace CMPlus.Infrastructure.Migrations
                     b.ToTable("FileImportJobs", null, t =>
                         {
                             t.HasCheckConstraint("CK_FileImportJobs_RowsImported", "[RowsImported] >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.PaymentCertificate", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ActualProgressPct")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<decimal>("AdvanceRecoveryAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("AllowSelfApproval")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("ApprovalPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ApprovalPolicyVersion")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ApprovePct")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<DateTimeOffset?>("CertifiedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal?>("ClaimPct")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CurrentStepNo")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<decimal>("GrossCertifiedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("MilestoneNo")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("MilestoneValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("NetPayment")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTimeOffset?>("PaidAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PaymentReference")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<decimal>("PreviousCumulativeApprovePct")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RetentionAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("SubmittedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TotalSteps")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProjectId", "MilestoneNo");
+
+                    b.HasIndex("TenantId", "ProjectId", "Status");
+
+                    b.ToTable("PaymentCertificates", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PaymentCertificates_ApprovePct", "[ApprovePct] >= 0 AND [ApprovePct] <= 100");
+
+                            t.HasCheckConstraint("CK_PaymentCertificates_GrossCertifiedAmount", "[GrossCertifiedAmount] >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.PaymentCertificateApprovalStep", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PaymentCertificateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("QuorumCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RequiredRole")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RevisionNo")
+                        .HasColumnType("int");
+
+                    b.Property<int>("StepNo")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentCertificateId");
+
+                    b.HasIndex("TenantId", "PaymentCertificateId", "RevisionNo", "StepNo");
+
+                    b.ToTable("PaymentCertificateApprovalSteps", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_PaymentCertificateApprovalSteps_QuorumCount", "[QuorumCount] >= 1");
+
+                            t.HasCheckConstraint("CK_PaymentCertificateApprovalSteps_RevisionNo", "[RevisionNo] >= 1");
+
+                            t.HasCheckConstraint("CK_PaymentCertificateApprovalSteps_StepNo", "[StepNo] >= 1");
                         });
                 });
 
@@ -589,6 +917,53 @@ namespace CMPlus.Infrastructure.Migrations
                         });
                 });
 
+            modelBuilder.Entity("CMPlus.Domain.Entities.ProjectFinanceLedger", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("EffectiveDate")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("EntryType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("PaymentCertificateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reference")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PaymentCertificateId");
+
+                    b.HasIndex("TenantId", "ProjectId", "Category");
+
+                    b.ToTable("ProjectFinanceLedgers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProjectFinanceLedgers_Amount_NotZero", "[Amount] <> 0");
+                        });
+                });
+
             modelBuilder.Entity("CMPlus.Domain.Entities.Tenant", b =>
                 {
                     b.Property<Guid>("Id")
@@ -687,6 +1062,29 @@ namespace CMPlus.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CMPlus.Domain.Entities.ActualCostEntry", b =>
+                {
+                    b.HasOne("CMPlus.Domain.Entities.Activity", null)
+                        .WithMany()
+                        .HasForeignKey("ActivityId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("CMPlus.Domain.Entities.FileImportJob", null)
+                        .WithMany()
+                        .HasForeignKey("FileImportJobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("CMPlus.Domain.Entities.ActualCostEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversesEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("CMPlus.Domain.Entities.WBSNode", null)
+                        .WithMany()
+                        .HasForeignKey("WbsNodeId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("CMPlus.Domain.Entities.ApprovalPolicyRule", b =>
                 {
                     b.HasOne("CMPlus.Domain.Entities.ApprovalPolicy", null)
@@ -705,6 +1103,23 @@ namespace CMPlus.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CMPlus.Domain.Entities.PaymentCertificateApprovalStep", b =>
+                {
+                    b.HasOne("CMPlus.Domain.Entities.PaymentCertificate", null)
+                        .WithMany("ApprovalSteps")
+                        .HasForeignKey("PaymentCertificateId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.ProjectFinanceLedger", b =>
+                {
+                    b.HasOne("CMPlus.Domain.Entities.PaymentCertificate", null)
+                        .WithMany()
+                        .HasForeignKey("PaymentCertificateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+                });
+
             modelBuilder.Entity("CMPlus.Domain.Entities.WBSNode", b =>
                 {
                     b.HasOne("CMPlus.Domain.Entities.WBSNode", null)
@@ -716,6 +1131,11 @@ namespace CMPlus.Infrastructure.Migrations
             modelBuilder.Entity("CMPlus.Domain.Entities.ApprovalPolicy", b =>
                 {
                     b.Navigation("Rules");
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.PaymentCertificate", b =>
+                {
+                    b.Navigation("ApprovalSteps");
                 });
 #pragma warning restore 612, 618
         }

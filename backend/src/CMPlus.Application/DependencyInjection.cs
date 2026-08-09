@@ -20,6 +20,11 @@ public static class DependencyInjection
 
         services.AddSingleton<Approval.IApprovalRoutingService, Approval.ApprovalRoutingService>();
 
+        // S7-BE-03/05: shared EVM orchestration (reader(s) -> EvmEngine -> EacCalculator) injected
+        // into both GetEvmQueryHandler and CloseEvmPeriodCommandHandler. Scoped (not singleton, unlike
+        // IApprovalRoutingService above) because its dependencies are scoped EF-Core-backed readers.
+        services.AddScoped<Features.Evm.EvmComputationService>();
+
         return services;
     }
 }

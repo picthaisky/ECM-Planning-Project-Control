@@ -1,8 +1,17 @@
 using CMPlus.Application.Approval;
 using CMPlus.Application.Common;
+using CMPlus.Application.Features.ActualCosts;
+using CMPlus.Application.Features.Approval;
+using CMPlus.Application.Features.CashFlow;
+using CMPlus.Application.Features.Cpm;
+using CMPlus.Application.Features.Dashboard;
+using CMPlus.Application.Features.Evm;
+using CMPlus.Application.Features.Gantt;
+using CMPlus.Application.Features.Payment;
 using CMPlus.Application.Features.Projects;
 using CMPlus.Application.Features.Progress;
 using CMPlus.Application.Import;
+using CMPlus.Application.Services.Cpm;
 using CMPlus.Application.Wbs;
 using Microsoft.AspNetCore.Mvc;
 
@@ -54,6 +63,50 @@ public static class ResultProblemMapper
 
             // S4-BE-05: activities-under-a-node read (GetNodeActivitiesQuery).
             [WbsErrorCodes.NodeNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+
+            // S5-BE-04: RecalculateCpmCommand. CpmValidationErrorCodes.CycleDetected is handled
+            // separately below (its Result.Error carries a dynamic ": A -> B -> A" chain suffix, so
+            // it cannot be an exact dictionary key) - DuplicateRelation/UnknownActivityInRelation
+            // never carry a dynamic suffix and are exact-matched here like every other code.
+            [CpmErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [CpmValidationErrorCodes.DuplicateRelation] = (StatusCodes.Status422UnprocessableEntity, "cpm-duplicate-relation", "Two relations exist between the same pair of activities in the same direction."),
+            [CpmValidationErrorCodes.UnknownActivityInRelation] = (StatusCodes.Status422UnprocessableEntity, "cpm-unknown-activity", "A relation references an activity outside this project's schedule."),
+
+            // S6-BE-01: the Gantt read (GetGanttQuery).
+            [GanttErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+
+            // S7-BE-03/05: the EVM read and period-close commands.
+            [EvmErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [EvmErrorCodes.SnapshotAlreadyExists] = (StatusCodes.Status409Conflict, "evm-snapshot-already-exists", "An EVM period snapshot for this data date has already been closed."),
+            [EvmErrorCodes.InvalidSnapshotRange] = (StatusCodes.Status400BadRequest, "evm-invalid-snapshot-range", "The 'from' date must not be later than the 'to' date."),
+
+            // S8 (actual-cost.md §9/§12, ADR-0013): RecordActualCostCommand.
+            [ActualCostErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [ActualCostErrorCodes.WbsNodeNotFound] = (StatusCodes.Status400BadRequest, "actual-cost-wbs-node-not-found", "The WBS node does not belong to this project."),
+            [ActualCostErrorCodes.ActivityNotFound] = (StatusCodes.Status400BadRequest, "actual-cost-activity-not-found", "The activity does not belong to this project."),
+            [ActualCostErrorCodes.ReversedEntryNotFound] = (StatusCodes.Status400BadRequest, "actual-cost-reversed-entry-not-found", "ReversesEntryId does not reference an existing cost entry in this project."),
+            [ActualCostErrorCodes.NoteRequiredForClosedPeriod] = (StatusCodes.Status422UnprocessableEntity, "actual-cost-note-required-for-closed-period", "A note is required when posting a cost entry into an already-closed EVM period."),
+
+            // S8-BE-01: GetCashFlowQuery.
+            [CashFlowErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [CashFlowErrorCodes.InvalidRange] = (StatusCodes.Status400BadRequest, "cash-flow-invalid-range", "The 'from' date must not be later than the effective data date."),
+
+            // S8-BE-02: GetDashboardQuery.
+            [DashboardErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+
+            // S9-BE-05: PaymentCertificate approval-chain commands (Submit/Approve/ReturnForRevision/
+            // Reject/RecordPayment). ApprovalErrorCodes.PolicyGap (422 approval-policy-gap) and
+            // "ApprovalPolicyNotFound" (404) above are reused as-is, not duplicated here.
+            [PaymentApprovalErrorCodes.NotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [PaymentApprovalErrorCodes.InvalidStatusForTransition] = (StatusCodes.Status409Conflict, "document-immutable", "The document is not in a state that allows this action."),
+            [PaymentApprovalErrorCodes.NotAuthorizedForApprovalStep] = (StatusCodes.Status403Forbidden, "not-current-step", "You are not authorized to act on this document's current approval step."),
+            [PaymentApprovalErrorCodes.SelfApprovalNotPermitted] = (StatusCodes.Status403Forbidden, "self-approval-not-permitted", "The document's creator or submitter may not approve their own submission."),
+            [PaymentApprovalErrorCodes.DuplicateChainApprover] = (StatusCodes.Status403Forbidden, "duplicate-chain-approver", "You have already approved a different step of this document's current approval chain."),
+            [PaymentApprovalErrorCodes.ConcurrencyConflict] = (StatusCodes.Status409Conflict, "concurrent-transition", "Another action has already changed this document. Reload and try again."),
+
+            // Security review sprint-09.md M-03: a corrupt/legacy chain snapshot degrades to a clear
+            // 409 instead of an unhandled 500.
+            [PaymentApprovalErrorCodes.CorruptApprovalChain] = (StatusCodes.Status409Conflict, "corrupt-approval-chain", "This document's approval chain could not be resolved. Contact support."),
         };
 
     public static ProblemDetails ToProblemDetails(string errorCode, string instancePath)
@@ -76,6 +129,70 @@ public static class ResultProblemMapper
                 Detail = errorCode[ValidationErrorCodes.Prefix.Length..],
                 Instance = instancePath,
             };
+        }
+
+        // S5-BE-04: GraphValidator (via CpmEngine) reports a cycle as
+        // "CpmCycleDetected: A -> B -> A" - a dynamic suffix, so it is matched by prefix here
+        // (same reasoning as the ValidationErrorCodes branch above) rather than as an exact
+        // dictionary key. The full detail (including the offending chain) is preserved for the
+        // caller/frontend to display, same discipline as the validation-error branch.
+        if (errorCode.StartsWith(CpmValidationErrorCodes.CycleDetected, StringComparison.Ordinal))
+        {
+            return new ProblemDetails
+            {
+                Status = StatusCodes.Status422UnprocessableEntity,
+                Type = "https://cmplus.dev/problems/cpm-cycle-detected",
+                Title = "The activity relation graph contains a cycle and cannot be scheduled.",
+                Detail = errorCode,
+                Instance = instancePath,
+            };
+        }
+
+        // S7-BE-03: GetEvmQuery. An unrecognised ?eacVariant= value carries the raw offending string
+        // as a dynamic suffix (same reasoning as the CpmValidationErrorCodes.CycleDetected branch
+        // above) so the response Detail is actionable, never a silent fallback to the project default
+        // (design.md §2.1).
+        if (errorCode.StartsWith(EvmErrorCodes.InvalidEacVariantPrefix, StringComparison.Ordinal))
+        {
+            return new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Type = "https://cmplus.dev/problems/invalid-eac-variant",
+                Title = "The requested EAC variant is not recognised.",
+                Detail = errorCode,
+                Instance = instancePath,
+            };
+        }
+
+        // S9-BE-06: UpdateApprovalPolicyCommand. Both prefixes carry the offending StepNo as a
+        // dynamic suffix (same reasoning as the two branches above) - surfaced as a proper
+        // machine-readable ProblemDetails.Extensions member (design.md §2.2: "400 body carries
+        // { invalidStepNo, problem }"), not only baked into Detail's free text.
+        if (errorCode.StartsWith(ApprovalPolicyErrorCodes.BandOverlapPrefix, StringComparison.Ordinal)
+            || errorCode.StartsWith(ApprovalPolicyErrorCodes.BandGapPrefix, StringComparison.Ordinal))
+        {
+            var isOverlap = errorCode.StartsWith(ApprovalPolicyErrorCodes.BandOverlapPrefix, StringComparison.Ordinal);
+            var prefix = isOverlap ? ApprovalPolicyErrorCodes.BandOverlapPrefix : ApprovalPolicyErrorCodes.BandGapPrefix;
+            var problemKind = isOverlap ? "BandOverlap" : "BandGap";
+
+            var bandProblem = new ProblemDetails
+            {
+                Status = StatusCodes.Status400BadRequest,
+                Type = isOverlap
+                    ? "https://cmplus.dev/problems/approval-policy-band-overlap"
+                    : "https://cmplus.dev/problems/approval-policy-band-gap",
+                Title = "The approval policy's rule bands are invalid.",
+                Detail = errorCode,
+                Instance = instancePath,
+            };
+
+            bandProblem.Extensions["problem"] = problemKind;
+            if (int.TryParse(errorCode[prefix.Length..], out var invalidStepNo) && invalidStepNo > 0)
+            {
+                bandProblem.Extensions["invalidStepNo"] = invalidStepNo;
+            }
+
+            return bandProblem;
         }
 
         var (status, type, title) = KnownErrors.TryGetValue(errorCode, out var mapping)

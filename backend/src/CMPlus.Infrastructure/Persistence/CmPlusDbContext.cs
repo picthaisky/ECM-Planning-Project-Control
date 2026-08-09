@@ -53,6 +53,32 @@ public sealed class CmPlusDbContext : DbContext
 
     public DbSet<FileImportJob> FileImportJobs => Set<FileImportJob>();
 
+    /// <summary>S7-BE-05: append-only, immutable (ADR-0009) - no update/delete path exists anywhere
+    /// (entity has no mutator methods/setters; see <see cref="Configurations.EvmPeriodSnapshotConfiguration"/>).</summary>
+    public DbSet<EvmPeriodSnapshot> EvmPeriodSnapshots => Set<EvmPeriodSnapshot>();
+
+    /// <summary>Actual Cost (AC/ACWP) ledger - append-only (actual-cost.md §6.5/§9, ADR-0013); no
+    /// update/delete path exists anywhere (entity has no mutator methods/setters; see
+    /// <see cref="Configurations.ActualCostEntryConfiguration"/>).</summary>
+    public DbSet<ActualCostEntry> ActualCostEntries => Set<ActualCostEntry>();
+
+    /// <summary>Payment Certificate (IPC) aggregate - S9-BE-01, approval-workflow.md §3/§4. Carries
+    /// a SQL Server <c>rowversion</c> optimistic-concurrency token (see
+    /// <see cref="Configurations.PaymentCertificateConfiguration"/>).</summary>
+    public DbSet<PaymentCertificate> PaymentCertificates => Set<PaymentCertificate>();
+
+    /// <summary>The resolved approval-chain snapshot owned by each <see cref="PaymentCertificate"/> -
+    /// security review sprint-09.md H-01 fix. Not append-only: <c>ReturnForRevision</c>/<c>Withdraw</c>
+    /// legitimately clear and re-populate it (see <see cref="Entities.PaymentCertificateApprovalStep"/>'s
+    /// own remarks).</summary>
+    public DbSet<PaymentCertificateApprovalStep> PaymentCertificateApprovalSteps => Set<PaymentCertificateApprovalStep>();
+
+    /// <summary>Retention/advance ledger - append-only (payment-retention.md §4, S9-BE-04); no
+    /// update/delete path exists anywhere (entity has no mutator methods/setters; see
+    /// <see cref="Configurations.ProjectFinanceLedgerConfiguration"/>). $R^{cum}$/$D^{cum}$ are
+    /// always read via <c>IProjectFinanceLedgerReader</c>'s <c>SUM()</c>, never recomputed.</summary>
+    public DbSet<ProjectFinanceLedger> ProjectFinanceLedgers => Set<ProjectFinanceLedger>();
+
     /// <summary>
     /// Narrow, explicitly grep-able escape hatch for the S3-BE-04 bulk-import path (ADR-0002-style
     /// discipline: any bypass of a default cross-cutting behaviour must be visible, not casual).

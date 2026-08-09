@@ -7,6 +7,7 @@ non-trivial work and follows links relevant to its task. Maintained by `knowledg
 ## Domain (construction project control)
 
 - [EVM formulas & worked examples](domain/evm-formulas.md) — PV/EV/AC, SV/CV, SPI/CPI, EAC/ETC/VAC, rollup rules, test fixtures
+- [Actual Cost (AC/ACWP)](domain/actual-cost.md) — what AC is (incurred, accrual basis), granularity, data sources, why certified payments are never AC, bitemporal/append-only rules, `ActualCostEntry` shape, AC-1…AC-10 fixtures
 - [CPM method](domain/cpm-method.md) — forward/backward pass, float, relation types, P6 reconciliation notes
 - [Approval workflow](domain/approval-workflow.md) — VO & Payment Certificate state machines, per-tenant permission matrix, amount-tiered authority, routing fixtures
 - [Payment & retention](domain/payment-retention.md) — corrected Net Payment formula, retention cap, advance-recovery methods, ledger, P1–P7 fixtures

@@ -1,3 +1,4 @@
+using CMPlus.Application.Features.Projects.Commands.SetEacVariantDefault;
 using CMPlus.Application.Features.Projects.Commands.UpdateProject;
 using CMPlus.Application.Features.Projects.Queries.GetProjects;
 using CMPlus.Domain.Enums;
@@ -72,6 +73,26 @@ public sealed class ProjectsController(ISender sender) : ControllerBase
             request.AdvanceRecoveryEndPct);
 
         var result = await sender.Send(command, cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : ResultProblemMapper.ToActionResult(result.Error, HttpContext.Request.Path);
+    }
+
+    /// <summary>
+    /// S7-BE-04 (ADR-0007(f)): sets `Project.EacVariantDefault`. Restricted to PM/QS/Executive
+    /// (deliberately narrower than <see cref="Update"/>'s PM/QS/Executive/Admin - ADR-0007(f) names
+    /// exactly these three roles and does not mention Admin, so Admin is excluded here rather than
+    /// carried over from <see cref="Update"/>'s gate by assumption). Audited automatically by
+    /// <c>AuditSaveChangesInterceptor</c> (old/new value) - see
+    /// <see cref="SetEacVariantDefaultCommand"/>'s remarks.
+    /// </summary>
+    [HttpPut("{projectId:guid}/eac-default")]
+    [Authorize(Roles = $"{nameof(UserRole.PM)},{nameof(UserRole.QS)},{nameof(UserRole.Executive)}")]
+    public async Task<IActionResult> SetEacDefault(
+        Guid projectId, [FromBody] SetEacVariantDefaultRequest request, CancellationToken cancellationToken)
+    {
+        var result = await sender.Send(new SetEacVariantDefaultCommand(projectId, request.Variant), cancellationToken);
 
         return result.IsSuccess
             ? Ok(result.Value)

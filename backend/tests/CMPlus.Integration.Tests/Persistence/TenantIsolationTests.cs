@@ -227,6 +227,56 @@ public class TenantIsolationTests
                 [new FileImportJob(
                     tenantId, Guid.NewGuid(), "schedule.xer", ImportFileFormat.Xer,
                     createdByUserId: Guid.NewGuid(), startedAt: DateTimeOffset.UtcNow)]),
+
+            [typeof(EvmPeriodSnapshot)] = tenantId => new EntityFixture(
+                [new EvmPeriodSnapshot(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow,
+                    bac: 1_000_000.00m, pv: 400_000.00m, ev: 300_000.00m, ac: 350_000.00m,
+                    eacVariant: EacVariant.CpiBased, performanceFactor: 1.166667m, eac: 1_166_666.67m,
+                    etc: 816_666.67m, vac: -166_666.67m, createdAt: DateTimeOffset.UtcNow, createdByUserId: Guid.NewGuid())]),
+
+            // actual-cost.md §9 (ADR-0013) - registered here per this file's own S1-QA-01 DoD
+            // comment: a new ITenantOwned entity must never silently fall outside isolation
+            // coverage.
+            [typeof(ActualCostEntry)] = tenantId => new EntityFixture(
+                [new ActualCostEntry(
+                    tenantId, Guid.NewGuid(), wbsNodeId: null, activityId: null,
+                    CostCategory.Material, ActualCostEntryType.Actual, ActualCostSource.ManualEntry,
+                    amount: 1_000.00m, incurredDate: DateTimeOffset.UtcNow, postedAt: DateTimeOffset.UtcNow,
+                    postedByUserId: Guid.NewGuid(), reversesEntryId: null, documentReference: null,
+                    costCode: null, vendorName: null, note: null, fileImportJobId: null, paidDate: null,
+                    quantity: null, unitOfMeasure: null)]),
+
+            // payment-retention.md / S9-BE-01 - registered here per this file's own S1-QA-01 DoD
+            // comment: a new ITenantOwned entity must never silently fall outside isolation coverage.
+            [typeof(PaymentCertificate)] = tenantId => new EntityFixture(
+                [new PaymentCertificate(
+                    tenantId, Guid.NewGuid(), milestoneNo: 1, "Period 1", milestoneValue: 1_000_000.00m,
+                    previousCumulativeApprovePct: 0m, createdByUserId: Guid.NewGuid())]),
+
+            // Security review sprint-09.md H-01 fix - registered here per this file's own S1-QA-01
+            // DoD comment: a new ITenantOwned entity must never silently fall outside isolation
+            // coverage. PaymentCertificate owns its ApprovalSteps rows (backing-field navigation) -
+            // listing both explicitly here mirrors the ApprovalPolicy/ApprovalPolicyRule fixture
+            // above; Add()-ing the certificate alone would cascade the steps in anyway, but being
+            // explicit keeps this fixture self-documenting for the PaymentCertificateApprovalStep
+            // theory case specifically.
+            [typeof(PaymentCertificateApprovalStep)] = tenantId =>
+            {
+                var certificate = new PaymentCertificate(
+                    tenantId, Guid.NewGuid(), milestoneNo: 1, "Period 1", milestoneValue: 1_000_000.00m,
+                    previousCumulativeApprovePct: 0m, createdByUserId: Guid.NewGuid());
+                certificate.SetPeriodClaim(100m, null, null, 1_000_000.00m, 0m, 0m, 1_000_000.00m);
+                certificate.Submit(
+                    [new PaymentCertificateApprovalStepInput(1, UserRole.QS, 1)],
+                    Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
+                return new EntityFixture([certificate, .. certificate.ApprovalSteps]);
+            },
+
+            // payment-retention.md §4 / S9-BE-04 - same reason as PaymentCertificate above.
+            [typeof(ProjectFinanceLedger)] = tenantId => new EntityFixture(
+                [ProjectFinanceLedger.CreateRetentionAccrual(
+                    tenantId, Guid.NewGuid(), Guid.NewGuid(), 1_000.00m, DateTimeOffset.UtcNow)]),
         };
 
     /// <summary>

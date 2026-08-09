@@ -11,7 +11,7 @@ namespace CMPlus.Domain.Entities;
 /// row, never an edit of an existing one (same append-only pattern as
 /// <see cref="ActivityProgressLog"/>).
 /// </summary>
-public sealed class AuditLog : Entity, ITenantOwned
+public sealed class AuditLog : Entity, ITenantOwned, IAppendOnly
 {
     public Guid TenantId { get; private set; }
 

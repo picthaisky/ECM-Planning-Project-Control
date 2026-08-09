@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { cx } from '../utils/cx'
 
-export type StatTileTone = 'neutral' | 'success' | 'danger' | 'warning'
+export type StatTileTone = 'neutral' | 'success' | 'danger' | 'warning' | 'gold'
 export type StatTileState = 'ready' | 'loading' | 'error'
 
 export interface StatTileProps {
@@ -22,6 +22,10 @@ const toneClasses: Record<StatTileTone, string> = {
   success: 'text-success',
   danger: 'text-danger',
   warning: 'text-warning-text',
+  // EVM S-Curve's EV tile (S7-FE-01) — matches the prototype's EV line/value colour exactly
+  // (`docs/ECM Planning Prototype.dc.html`'s `evmMetrics` mock, `/cmplus-ui`'s "EV line" token
+  // note) — brand gold, not a one-off hex (`text-gold`, generated from `src/config/theme.ts`).
+  gold: 'text-gold',
 }
 
 /** Dashboard KPI tile: label + value + optional formula/caption sub-line. */

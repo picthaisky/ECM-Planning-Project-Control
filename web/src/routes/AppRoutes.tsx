@@ -1,6 +1,10 @@
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { AppShell, NAV_ENTRIES } from '../components/layout'
 import { LoginPage } from '../features/auth'
+import { CashFlowPage } from '../features/cash'
+import { DashboardPage } from '../features/dashboard'
+import { EvmPage } from '../features/evm'
+import { GanttPage } from '../features/gantt'
 import { ProjectInfoPage } from '../features/info'
 import { WbsPage } from '../features/wbs'
 import { useAuthStore } from '../store/authStore'
@@ -9,11 +13,17 @@ import { RequireAuth } from './RequireAuth'
 import { ScreenPlaceholder } from './ScreenPlaceholder'
 import { SelectProjectPage } from './SelectProjectPage'
 
-/** Real content for the two screens built this sprint (S4-FE-02/03); every other nav entry is a
- * `ScreenPlaceholder` until its own sprint lands (S4-FE-01 DoD). */
+/** Real content for the screens built so far (S4-FE-02/03, S6-FE-01/02/03, S7-FE-01..04,
+ * S8-FE-01/02); every other nav entry is a `ScreenPlaceholder` until its own sprint lands
+ * (S4-FE-01 DoD) — see `components/layout/navConfig.ts#IMPLEMENTED_SCREENS`, kept in sync with
+ * this function. */
 function screenElement(id: (typeof NAV_ENTRIES)[number]['id'], label: string) {
+  if (id === 'dashboard') return <DashboardPage />
   if (id === 'info') return <ProjectInfoPage />
   if (id === 'wbs') return <WbsPage />
+  if (id === 'gantt') return <GanttPage />
+  if (id === 'evm') return <EvmPage />
+  if (id === 'cash') return <CashFlowPage />
   return <ScreenPlaceholder title={label} />
 }
 

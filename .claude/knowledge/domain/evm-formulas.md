@@ -9,7 +9,7 @@ percent `decimal(5,2)`; keep full precision in intermediates, round at display.
 | --- | --- | --- |
 | $PV$ (BCWS) | $\sum_{i \in scheduled(t)} BudgetCost_i \cdot plannedPct_i(t)$ | มูลค่าตามแผน |
 | $EV$ (BCWP) | $\sum_i BudgetCost_i \cdot \frac{ProgressPct_i}{100}$ | มูลค่างานที่ทำได้จริง |
-| $AC$ (ACWP) | $\sum$ actual cost recorded $\le t$ | ค่าใช้จ่ายจริง |
+| $AC$ (ACWP) | $\sum_{e\,:\,IncurredDate_e \le t} Amount_e$ | ต้นทุน**ที่เกิดขึ้นจริง** (incurred, accrual basis) — **not** paid, **not** committed, **never** certified payments. Full ruling + source of the data: [actual-cost.md](actual-cost.md) |
 | $SV$ | $EV - PV$ | $\ge 0$ = on/ahead of schedule |
 | $CV$ | $EV - AC$ | $\ge 0$ = under budget |
 | $SPI$ | $EV / PV$ | undefined if $PV = 0$ → return null |
@@ -24,6 +24,13 @@ percent `decimal(5,2)`; keep full precision in intermediates, round at display.
 The EAC variant used must be stated per feature spec; dashboard default = $BAC / CPI$.
 **EAC is user-selectable** — see [§ EAC Variants (selectable)](#eac-variants-selectable)
 for the unified PF form, all variants, edge-case rules and fixtures.
+
+$AC$'s definition, granularity, data source, bitemporal storage rules and its (non-)relationship to
+certified payments are ruled on in **[actual-cost.md](actual-cost.md)** — read it before touching any
+$CV$/$CPI$/$EAC$ code path. Two rules from there that bind this file:
+$AC(t)$ is summed on the entry's **`IncurredDate`**, using the *same* inclusive `<= t` boundary
+convention as `ActivityProgressLog.PeriodEndDate` (ADR-0009), so $EV$ and $AC$ never straddle a
+period boundary differently; and a certified/received payment is **never** $AC$.
 
 ## Progress rollup (WBS tree)
 
@@ -95,7 +102,8 @@ A UI that lists the variants must never assume a fixed ordering when colour-codi
 | --- | --- |
 | $BAC - EV = 0$ (work complete, or zero-budget scope) | **Short-circuit before dividing:** $ETC = 0.00$, $EAC = AC$ for *every* variant. Never evaluate $PF$. |
 | $EV = 0 \wedge AC = 0 \wedge PV = 0$ (not started) | All variants → `null`, reason `NotStarted`. Render "—". |
-| $AC = 0 \wedge EV > 0$ (actuals not yet posted) | $CPI$ undefined → `CpiBased`, `CpiSpiBased`, and (by rule) `Atypical` all → `null`, reason `NoActualCost`, plus a data-quality warning. `Atypical` is arithmetically computable ($=BAC-EV$) but excludes the cost of work already done, so it is **suppressed on purpose**. `BottomUpEtc` remains valid if $ETC_{manual}$ is supplied. |
+| $AC = 0 \wedge EV > 0$ (actuals not yet posted) | $CPI$ undefined → `CpiBased`, `CpiSpiBased`, and (by rule) `Atypical` all → `null`, reason `NoActualCost`, plus a data-quality warning. `Atypical` is arithmetically computable ($=BAC-EV$) but excludes the cost of work already done, so it is **suppressed on purpose**. `BottomUpEtc` remains valid if $ETC_{manual}$ is supplied. ⚠️ Two distinct causes share this reason — *no cost entries at all* vs *entries that net to 0.00* (a reversed accrual). The reason code stays the same; the **warning copy must differ**, which is why the AC reader returns an entry count (actual-cost.md §7.6, fixtures AC-5/AC-6). |
+| $AC < 0$ (over-reversal / credit note exceeds cost) | Compute $AC$ as-is, **do not clamp**; $CPI$ is meaningless → return `null` with recommended reason `NegativeActualCost` + data-quality warning (actual-cost.md §7.6, open question Q6). |
 | $PV = 0 \wedge EV > 0$ (no baseline / unbaselined scope) | $SPI$ undefined → `CpiSpiBased` → `null`, reason `NoPlannedValue`. `CpiBased`, `Atypical`, `BottomUpEtc`, `CustomPf` remain valid. |
 | $EV = 0 \wedge AC > 0$ (cost burned, nothing earned) | $CPI = 0$ → `CpiBased`, `CpiSpiBased` → `null` (division by zero), reason `ZeroCpi`. `Atypical` = $AC + BAC$ is valid and is what the dashboard should show. |
 | $EV > BAC$ (progress or weights corrupt) | $ETC$ goes negative. Compute and return as-is, **and** raise validation warning `EarnedValueExceedsBudget`. Clamp `ProgressPercentage` to $[0,100]$ at input instead of masking it here. |
@@ -187,3 +195,9 @@ Ordering here is $D3 < D1 < D2$ — the mirror of Fixture A. Assert this reversa
 Three cumulative series on the time axis: PV (plan), EV (earned), AC (actual), plus EAC
 forecast extension (dashed, forecast-blue). A VO approval changes BAC → S-Curve rebaselines
 from the approval date; historical points are never rewritten (audit integrity).
+
+The AC series is time-phased on `IncurredDate` using **half-open, lower-exclusive** period buckets
+$AC_{(a,b]}$ so adjacent periods never double-count a boundary day (actual-cost.md §7.5, fixture
+AC-10). Cash Flow additionally plots **cumulative receipts** from the certificate/finance ledger —
+a *different* series from AC; their difference is the funding position and is the only legitimate
+arithmetic between the two ledgers (actual-cost.md §5).

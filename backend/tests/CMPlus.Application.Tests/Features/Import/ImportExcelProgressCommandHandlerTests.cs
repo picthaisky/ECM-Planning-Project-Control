@@ -81,6 +81,8 @@ public class ImportExcelProgressCommandHandlerTests
     private sealed class FakeCurrentUserContext(Guid? userId) : ICurrentUserContext
     {
         public Guid? UserId { get; } = userId;
+
+        public UserRole Role => UserRole.PM;
     }
 
     private sealed class FakeClock(DateTimeOffset now) : IDateTimeProvider
