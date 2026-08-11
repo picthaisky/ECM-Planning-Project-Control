@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { AppShell, NAV_ENTRIES } from '../components/layout'
 import { LoginPage } from '../features/auth'
+import { BaselinePage } from '../features/baseline'
 import { CashFlowPage } from '../features/cash'
 import { DashboardPage } from '../features/dashboard'
 import { EvmPage } from '../features/evm'
@@ -22,8 +23,8 @@ import { ScreenPlaceholder } from './ScreenPlaceholder'
 import { SelectProjectPage } from './SelectProjectPage'
 
 /** Real content for the screens built so far (S4-FE-02/03, S6-FE-01/02/03, S7-FE-01..04,
- * S8-FE-01/02, S9-FE-01/02, S10-FE-01/02, S11-FE-01, S12-FE-01/02); every other nav entry is a
- * `ScreenPlaceholder` until its own sprint lands (S4-FE-01 DoD) — see
+ * S8-FE-01/02, S9-FE-01/02, S10-FE-01/02, S11-FE-01, S12-FE-01/02, S14-FE-01/02); every other nav
+ * entry is a `ScreenPlaceholder` until its own sprint lands (S4-FE-01 DoD) — see
  * `components/layout/navConfig.ts#IMPLEMENTED_SCREENS`, kept in sync with this function. */
 function screenElement(id: (typeof NAV_ENTRIES)[number]['id'], label: string) {
   if (id === 'dashboard') return <DashboardPage />
@@ -38,6 +39,7 @@ function screenElement(id: (typeof NAV_ENTRIES)[number]['id'], label: string) {
   if (id === 'weather') return <WeatherPage />
   if (id === 'maneq') return <ManeqPage />
   if (id === 'issue') return <IssuePage />
+  if (id === 'baseline') return <BaselinePage />
   return <ScreenPlaceholder title={label} />
 }
 

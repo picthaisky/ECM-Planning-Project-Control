@@ -13,6 +13,20 @@
          with no such gap; SQL Server (the real target) has full native datetimeoffset comparison
          support, so this is purely a test-double choice, not a production concern. -->
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.10" />
+    <!-- S14-QA-01: a real, constraint-enforcing relational engine for the single-active-baseline
+         filtered-unique-index probe (Baseline/BaselineActivitySnapshot only - see
+         Baseline/BaselineActivationOrderingSqliteTests.cs). InMemory ignores unique indexes
+         entirely (see CmPlusDbContext remarks / docs/perf/s14-baseline-storage.md §2), so this is
+         the only way any test in this repository can observe SaveChanges statement ordering
+         against a real filtered unique index. This is an intentionally narrow, additive use of
+         Sqlite alongside the project-wide InMemory choice above - it does not touch any query that
+         needs the DateTimeOffset relational-comparison translation InMemory was chosen to avoid. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.10" />
+    <!-- Microsoft.EntityFrameworkCore.Sqlite 10.0.10 transitively pulls SQLitePCLRaw.bundle_e_sqlite3
+         2.1.11, which NU1903 flags as a known high-severity vulnerability
+         (GHSA-2m69-gcr7-jv3q). Pinned up explicitly to the latest published fix so this addition
+         does not regress the sprint's "0 warnings" build bar. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
     <!-- S2-BE-01/03/07: end-to-end HTTP-level tests (login, JWT validation, ProblemDetails,
          Admin-only + cross-tenant 404) against the real WebApi host via WebApplicationFactory. -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />

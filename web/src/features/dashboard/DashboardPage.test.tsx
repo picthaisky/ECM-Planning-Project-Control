@@ -26,7 +26,7 @@ vi.mock('../gantt/api', async () => {
 })
 vi.mock('../wbs/api', async () => {
   const actual = await vi.importActual<typeof import('../wbs/api')>('../wbs/api')
-  return { ...actual, getWbsTree: vi.fn() }
+  return { ...actual, getWbsTreeWithCacheInfo: vi.fn() }
 })
 
 const sampleDashboard: DashboardResponseDto = {
@@ -102,7 +102,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     vi.mocked(dashboardApi.getDashboard).mockReset()
     vi.mocked(evmApi.listEvmSnapshots).mockReset()
     vi.mocked(ganttApi.getGantt).mockReset()
-    vi.mocked(wbsApi.getWbsTree).mockReset()
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockReset()
     useAuthStore.getState().logout()
   })
 
@@ -110,7 +110,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     vi.mocked(dashboardApi.getDashboard).mockResolvedValueOnce(sampleDashboard)
     vi.mocked(evmApi.listEvmSnapshots).mockResolvedValueOnce([])
     vi.mocked(ganttApi.getGantt).mockResolvedValueOnce(sampleGantt)
-    vi.mocked(wbsApi.getWbsTree).mockResolvedValueOnce(sampleWbsTree)
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleWbsTree, servedFromOfflineCache: false })
 
     renderPage('PM')
     expect(screen.getByText('กำลังโหลดข้อมูล Dashboard...')).toBeInTheDocument()
@@ -136,7 +136,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     vi.mocked(dashboardApi.getDashboard).mockRejectedValueOnce(new dashboardApi.DashboardApiError('ไม่พบโครงการที่ระบุ', 404))
     vi.mocked(evmApi.listEvmSnapshots).mockResolvedValueOnce([])
     vi.mocked(ganttApi.getGantt).mockResolvedValueOnce(sampleGantt)
-    vi.mocked(wbsApi.getWbsTree).mockResolvedValueOnce(sampleWbsTree)
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleWbsTree, servedFromOfflineCache: false })
 
     renderPage('PM')
 
@@ -147,7 +147,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     vi.mocked(dashboardApi.getDashboard).mockResolvedValue(sampleDashboard)
     vi.mocked(evmApi.listEvmSnapshots).mockResolvedValue([])
     vi.mocked(ganttApi.getGantt).mockResolvedValue(sampleGantt)
-    vi.mocked(wbsApi.getWbsTree).mockResolvedValue(sampleWbsTree)
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockResolvedValue({ tree: sampleWbsTree, servedFromOfflineCache: false })
 
     const { unmount } = renderPage('Site')
     expect(await screen.findByText('403')).toBeInTheDocument()
@@ -157,7 +157,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     expect(dashboardApi.getDashboard).not.toHaveBeenCalled()
     expect(evmApi.listEvmSnapshots).not.toHaveBeenCalled()
     expect(ganttApi.getGantt).not.toHaveBeenCalled()
-    expect(wbsApi.getWbsTree).not.toHaveBeenCalled()
+    expect(wbsApi.getWbsTreeWithCacheInfo).not.toHaveBeenCalled()
     unmount()
 
     renderPage('PM')
@@ -182,7 +182,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     vi.mocked(dashboardApi.getDashboard).mockResolvedValueOnce(noActualCost)
     vi.mocked(evmApi.listEvmSnapshots).mockResolvedValueOnce([])
     vi.mocked(ganttApi.getGantt).mockResolvedValueOnce(sampleGantt)
-    vi.mocked(wbsApi.getWbsTree).mockResolvedValueOnce(sampleWbsTree)
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleWbsTree, servedFromOfflineCache: false })
 
     renderPage('PM')
 
@@ -194,7 +194,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     vi.mocked(dashboardApi.getDashboard).mockResolvedValueOnce(sampleDashboard)
     vi.mocked(evmApi.listEvmSnapshots).mockResolvedValueOnce([])
     vi.mocked(ganttApi.getGantt).mockRejectedValueOnce(new ganttApi.GanttApiError('โหลดข้อมูล Gantt ไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'))
-    vi.mocked(wbsApi.getWbsTree).mockResolvedValueOnce(sampleWbsTree)
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleWbsTree, servedFromOfflineCache: false })
 
     renderPage('PM')
 
@@ -214,7 +214,7 @@ describe('DashboardPage (S8-FE-01 integration)', () => {
     })
     vi.mocked(evmApi.listEvmSnapshots).mockResolvedValueOnce([])
     vi.mocked(ganttApi.getGantt).mockResolvedValueOnce(sampleGantt)
-    vi.mocked(wbsApi.getWbsTree).mockResolvedValueOnce(sampleWbsTree)
+    vi.mocked(wbsApi.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleWbsTree, servedFromOfflineCache: false })
 
     renderPage('PM')
 

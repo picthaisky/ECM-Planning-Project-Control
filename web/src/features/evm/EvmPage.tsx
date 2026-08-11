@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { ChartCard } from '../../components'
 import { RequireRole } from '../../routes'
 import { EacVariantSelect } from './components/EacVariantSelect'
 import { EvmMetricsGrid } from './components/EvmMetricsGrid'
 import { SCurveChart } from './components/SCurveChart'
 import { SetEacDefaultButton } from './components/SetEacDefaultButton'
-import { EAC_NULL_REASON_LABELS, buildSCurvePoints, findVariantResult } from './evmSelectors'
+import { EAC_NULL_REASON_LABELS, EVM_WARNING_LABELS, buildSCurvePoints, findVariantResult } from './evmSelectors'
 import { useEvmData } from './useEvmData'
 import { useEvmSnapshots } from './useEvmSnapshots'
 import type { EacVariant } from './types'
@@ -81,7 +81,12 @@ export function EvmPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <EacVariantSelect variants={evm.variants} selected={selectedVariant} onChange={setSelectedVariant} />
+        <EacVariantSelect
+          variants={evm.variants}
+          selected={selectedVariant}
+          onChange={setSelectedVariant}
+          projectId={projectId}
+        />
 
         <RequireRole allowedRoles={[...EAC_DEFAULT_ROLES]}>
           <SetEacDefaultButton
@@ -102,7 +107,24 @@ export function EvmPage() {
 
       {evm.warnings.length > 0 && (
         <div role="alert" className="rounded-card border border-danger/30 bg-danger/5 px-3 py-2 text-[11px] text-danger">
-          {evm.warnings.join(' · ')}
+          <ul className="list-disc space-y-1 pl-4">
+            {evm.warnings.map((code) => (
+              <li key={code}>
+                {EVM_WARNING_LABELS[code] ?? code}
+                {/* domain-rules.md §5.7: re-entering EacManualEtc on Project Info is exactly the
+                 * fix for this specific warning — connect the two screens rather than leaving the
+                 * user to guess where "the input" lives. */}
+                {code === 'ManualEtcPredatesBacChange' && (
+                  <>
+                    {' '}
+                    <Link to={`/app/${projectId}/info`} className="font-semibold underline">
+                      ไปกรอกค่าประมาณการใหม่ที่หน้าข้อมูลโครงการ →
+                    </Link>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

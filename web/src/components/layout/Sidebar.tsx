@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import { NavLink, useParams } from 'react-router-dom'
+import { Button, Modal, SyncStatusBadge } from '../index'
+import { useOutboxSyncStatus } from '../../services/useOutboxSyncStatus'
 import { useAuthStore } from '../../store/authStore'
 import { cx } from '../../utils/cx'
 import { NAV_ENTRIES } from './navConfig'
@@ -22,11 +25,27 @@ const ROLE_LABEL: Record<string, string> = {
  * prototype's `width:222px` sidebar, `34px` gold logo tile, and nav row proportions exactly
  * (ADR-0006) — see this component's test file for the visual-diff assertions (colors, widths,
  * active-state classes) checked against the prototype's literal inline-style values.
+ *
+ * S13-FE-03 additions: the system-wide `SyncStatusBadge` (one shared `useOutboxSyncStatus` instance,
+ * so the badge's own display and the gate below read the exact same counts, rather than each
+ * mounting an independent sync engine) and the N-03 sign-out gate (Sprint 12 security review) — "ออก
+ * จากระบบ" destroyed un-synced photo bytes with no warning at all; it now asks first whenever this
+ * owner has anything not yet synced, and only then.
  */
 export function Sidebar() {
   const { projectId } = useParams<{ projectId: string }>()
   const role = useAuthStore((state) => state.claims?.role)
   const logout = useAuthStore((state) => state.logout)
+  const syncStatus = useOutboxSyncStatus()
+  const [confirmingLogout, setConfirmingLogout] = useState(false)
+
+  function handleLogoutClick() {
+    if (syncStatus.pendingCount > 0) {
+      setConfirmingLogout(true)
+    } else {
+      logout()
+    }
+  }
 
   return (
     <nav
@@ -76,6 +95,10 @@ export function Sidebar() {
         ))}
       </div>
 
+      <div className="border-t border-white/10 px-[18px] py-2">
+        <SyncStatusBadge status={syncStatus} />
+      </div>
+
       <div className="mt-auto flex items-center gap-2.5 border-t border-white/10 px-[18px] py-3.5">
         <div
           aria-hidden="true"
@@ -89,13 +112,54 @@ export function Sidebar() {
           </div>
           <button
             type="button"
-            onClick={logout}
+            onClick={handleLogoutClick}
             className="text-white/45 underline decoration-dotted hover:text-white/70"
           >
             ออกจากระบบ
           </button>
         </div>
       </div>
+
+      <Modal
+        isOpen={confirmingLogout}
+        onClose={() => setConfirmingLogout(false)}
+        title="ก่อนออกจากระบบ"
+        footer={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setConfirmingLogout(false)}>
+              ยกเลิก
+            </Button>
+            {syncStatus.pendingCount > 0 && (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={syncStatus.isSyncing}
+                onClick={() => void syncStatus.syncNow()}
+              >
+                ซิงค์ก่อนออกจากระบบ
+              </Button>
+            )}
+            <Button variant="danger" size="sm" onClick={logout}>
+              {syncStatus.pendingCount > 0 ? 'ออกจากระบบโดยไม่ซิงค์' : 'ออกจากระบบ'}
+            </Button>
+          </>
+        }
+      >
+        {syncStatus.pendingCount > 0 ? (
+          <div className="space-y-2">
+            <p>คุณมีรายการที่ยังไม่ได้ซิงค์ {syncStatus.pendingCount.toLocaleString('th-TH')} รายการ</p>
+            {syncStatus.pendingBlobCount > 0 && (
+              <p className="text-danger">
+                หากออกจากระบบตอนนี้ ไฟล์แนบ (เช่น รูปภาพ) ของรายการที่ยังไม่ซิงค์ {syncStatus.pendingBlobCount.toLocaleString('th-TH')}{' '}
+                รายการจะถูกลบออกจากอุปกรณ์นี้เพื่อความปลอดภัย และต้องบันทึกใหม่ภายหลัง — ข้อมูลอื่น (เช่น วันที่/รายละเอียด) จะยังคงอยู่
+              </p>
+            )}
+            <p className="text-text-faint">แนะนำให้กด &quot;ซิงค์ก่อนออกจากระบบ&quot; ขณะยังมีสัญญาณอินเทอร์เน็ต</p>
+          </div>
+        ) : (
+          <p>ซิงค์ครบแล้ว ออกจากระบบได้เลย</p>
+        )}
+      </Modal>
     </nav>
   )
 }

@@ -14,6 +14,9 @@
          is not available in this solution's restore sources. -->
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.19.2" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.10" />
+    <!-- S13-DB-01: IdempotencyKeyCleanupService is a BackgroundService (Microsoft.Extensions.Hosting.Abstractions) -
+         not otherwise pulled in transitively by anything else this project references. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
     <!-- S3-BE-03: Excel import/export templates. EPPlus 8's license (Polyform Noncommercial /
          commercial) must be set at runtime via ExcelPackage.License - see ExcelPackageLicense.cs.
          CM+ is a commercial product: a real commercial license key must replace the NonCommercial

@@ -6,8 +6,25 @@ export type { ListWeatherLogsOptions } from './api'
 export { useWeatherLogs } from './useWeatherLogs'
 export type { WeatherLogsLoadState } from './useWeatherLogs'
 
-export { useWeatherLogActions } from './useWeatherLogActions'
-export type { WeatherActionKind } from './useWeatherLogActions'
+export { useWeatherLogOutbox } from './useWeatherLogOutbox'
+export type { UseWeatherLogOutboxResult } from './useWeatherLogOutbox'
+
+export {
+  WEATHER_LOG_CORRECTION_OUTBOX_KIND,
+  WEATHER_LOG_OUTBOX_KIND,
+  createWeatherLogCorrectionUploader,
+  parseWeatherLogTargetRef,
+  pendingWeatherLogItemToDto,
+  resolveWeatherLogTargetId,
+  toLocalWeatherLogTargetId,
+  uploadWeatherLogOutboxItem,
+} from './weatherOutbox'
+export type {
+  WeatherLogCorrectionOutboxPayload,
+  WeatherLogOutboxPayload,
+  WeatherLogTargetRef,
+  WeatherLogTargetResolution,
+} from './weatherOutbox'
 
 export { useEotEvaluation } from './useEotEvaluation'
 export type { EotEvaluationState } from './useEotEvaluation'
@@ -47,6 +64,8 @@ export { WeatherCorrectionModal } from './components/WeatherCorrectionModal'
 export type { WeatherCorrectionModalProps } from './components/WeatherCorrectionModal'
 export { WeatherLogFormFields } from './components/WeatherLogFormFields'
 export { WeatherLogTable } from './components/WeatherLogTable'
+export { WeatherOutboxQueue } from './components/WeatherOutboxQueue'
+export type { WeatherOutboxQueueProps } from './components/WeatherOutboxQueue'
 export { WeatherRecordModal } from './components/WeatherRecordModal'
 export type { WeatherRecordModalProps } from './components/WeatherRecordModal'
 export { WeatherSummaryTiles } from './components/WeatherSummaryTiles'

@@ -4,14 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ProjectMasterCard } from './ProjectMasterCard'
 import { useAuthStore } from '../../store/authStore'
 import * as api from './api'
-import type { Project } from './types'
+import type { Project, ProjectDetail } from './types'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
   return { ...actual, getProject: vi.fn(), updateProject: vi.fn() }
 })
 
-const sampleProject: Project = {
+const sampleProject: ProjectDetail = {
   id: 'project-1',
   name: 'Riverside Condominium Tower B',
   code: 'RCT-B',
@@ -30,6 +30,10 @@ const sampleProject: Project = {
   advanceRecoveryStartPct: null,
   advanceRecoveryRatePct: null,
   advanceRecoveryEndPct: null,
+  eacVariantDefault: 'CpiBased',
+  eacManualEtc: null,
+  eacCustomPerformanceFactor: null,
+  eacManualEtcStaleSince: null,
 }
 
 function loginAs(role: 'PM' | 'Site') {

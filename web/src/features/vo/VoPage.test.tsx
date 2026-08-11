@@ -7,7 +7,7 @@ import * as voApi from './api'
 import * as infoApi from '../info/api'
 import { useAuthStore } from '../../store/authStore'
 import type { UserRole } from '../../store/authStore'
-import type { Project } from '../info'
+import type { ProjectDetail } from '../info'
 import type { VariationOrderDto } from './types'
 
 // jsdom performs no real layout, so the scroll container's offsetWidth/Height (what
@@ -75,7 +75,7 @@ const draftVo: VariationOrderDto = {
   escalationBasisContractValue: null,
 }
 
-const project: Project = {
+const project: ProjectDetail = {
   id: 'project-1',
   name: 'โครงการทดสอบ',
   code: 'TEST-01',
@@ -94,6 +94,10 @@ const project: Project = {
   advanceRecoveryStartPct: null,
   advanceRecoveryRatePct: null,
   advanceRecoveryEndPct: null,
+  eacVariantDefault: 'CpiBased',
+  eacManualEtc: null,
+  eacCustomPerformanceFactor: null,
+  eacManualEtcStaleSince: null,
 }
 
 function renderPage(role: UserRole = 'PM') {

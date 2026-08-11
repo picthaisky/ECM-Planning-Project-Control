@@ -212,5 +212,40 @@ describe('features/evm/api', () => {
         status: 403,
       })
     })
+
+    // S14-BE-03: selecting BottomUpEtc/CustomPf before their own input is configured.
+    // `EacVariantSelect` already disables the option client-side (S14-FE-02 DoD) so this is mostly
+    // defense-in-depth, but the edge case `evmSelectors.ts#MISSING_EAC_INPUT_REASON` documents (a
+    // stale/ambiguous `reason`) can still let a click through — the backend's own 400 must still
+    // read in Thai, not as a raw code.
+    it('translates ProjectEacManualEtcRequiredForBottomUpEtc to a Thai message pointing at Project Info', async () => {
+      vi.mocked(apiClient.put).mockRejectedValueOnce(
+        makeError(400, {
+          type: 'https://cmplus.dev/problems/eac-manual-etc-required-for-bottom-up-etc',
+          detail: 'ProjectEacManualEtcRequiredForBottomUpEtc',
+        }),
+      )
+
+      await expect(setEacVariantDefault('project-1', 'BottomUpEtc')).rejects.toMatchObject({
+        name: 'EvmApiError',
+        status: 400,
+        message: expect.stringContaining('Project Info'),
+      })
+    })
+
+    it('translates ProjectEacCustomPerformanceFactorRequiredForCustomPf to its own Thai message', async () => {
+      vi.mocked(apiClient.put).mockRejectedValueOnce(
+        makeError(400, {
+          type: 'https://cmplus.dev/problems/eac-custom-performance-factor-required-for-custom-pf',
+          detail: 'ProjectEacCustomPerformanceFactorRequiredForCustomPf',
+        }),
+      )
+
+      await expect(setEacVariantDefault('project-1', 'CustomPf')).rejects.toMatchObject({
+        name: 'EvmApiError',
+        status: 400,
+        message: expect.stringContaining('Custom Performance Factor'),
+      })
+    })
   })
 })

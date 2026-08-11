@@ -1,4 +1,5 @@
 using CMPlus.Application.Abstractions;
+using CMPlus.Application.Features.Approval;
 using CMPlus.Application.Features.Approval.Commands.UpdateApprovalPolicy;
 using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
@@ -20,15 +21,21 @@ public class UpdateApprovalPolicyCommandHandlerTests
 
         public int SaveCallCount { get; private set; }
 
+        /// <summary>Simulates <c>IApprovalPolicyRepository.SaveChangesAsync</c> reporting the
+        /// concurrent-request race (S14-BE-01 review follow-up) - set <see langword="false"/> in a
+        /// test to exercise <c>UpdateApprovalPolicyCommandHandler</c>'s new
+        /// <c>ApprovalPolicyErrorCodes.ConcurrencyConflict</c> branch without a real database.</summary>
+        public bool SaveChangesSucceeds { get; set; } = true;
+
         public Task<ApprovalPolicy?> FindActiveTenantDefaultAsync(ApprovalDocumentType documentType, CancellationToken cancellationToken = default) =>
             Task.FromResult(Current);
 
         public void AddVersion(ApprovalPolicy policy) => AddedVersions.Add(policy);
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+        public Task<bool> SaveChangesAsync(CancellationToken cancellationToken = default)
         {
             SaveCallCount++;
-            return Task.CompletedTask;
+            return Task.FromResult(SaveChangesSucceeds);
         }
     }
 
@@ -142,6 +149,25 @@ public class UpdateApprovalPolicyCommandHandlerTests
         Assert.Equal("ApprovalPolicyBandOverlap:1", result.Error);
         Assert.Empty(repository.AddedVersions); // nothing was ever staged/saved
         Assert.Equal(0, repository.SaveCallCount);
+    }
+
+    /// <summary>S14-BE-01 review follow-up: <see cref="IApprovalPolicyRepository.SaveChangesAsync"/>
+    /// returning <see langword="false"/> (a genuine concurrent-request race on the filtered unique
+    /// index, or - unreachable today, kept for symmetry - an optimistic-concurrency mismatch) must
+    /// surface as <see cref="ApprovalPolicyErrorCodes.ConcurrencyConflict"/>, never an unhandled
+    /// exception or a false-success response.</summary>
+    [Fact]
+    public async Task Handle_Returns_ConcurrencyConflict_When_The_Repository_Reports_A_Failed_Save()
+    {
+        var (handler, repository) = CreateHandler();
+        repository.SaveChangesSucceeds = false;
+
+        var result = await handler.Handle(
+            new UpdateApprovalPolicyCommand(ApprovalDocumentType.PaymentCertificate, false, null, null, ValidIpcRules),
+            CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ApprovalPolicyErrorCodes.ConcurrencyConflict, result.Error);
     }
 
     [Fact]

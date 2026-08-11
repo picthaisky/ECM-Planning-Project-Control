@@ -6,11 +6,17 @@ import type { PhotoDto, UploadPhotoFields } from './types'
 /** Mirrors `features/weather/api.ts#WeatherApiError`'s established shape/discipline exactly. */
 export class PhotoApiError extends Error {
   readonly status?: number
+  /** Raw backend `ProblemDetails.detail`/type-slug code (e.g. `'IdempotencyPayloadMismatch'`) behind
+   * the already-Thai `.message` — S13-FE-01: `photoOutbox.ts`'s uploader checks this against
+   * `IDEMPOTENCY_CONFLICT_CODES` to decide `OutboxConflictError` vs an ordinary retryable throw,
+   * without string-matching the translated message. `undefined` for a non-Axios error. */
+  readonly code?: string
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, code?: string) {
     super(message)
     this.name = 'PhotoApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -43,6 +49,22 @@ const PHOTO_ERROR_TITLES: Record<string, string> = {
 
   'validation-error': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
   'bad-request': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
+
+  // S13-BE-01 `IdempotencyMiddleware` now wraps this endpoint too (`[Idempotent]` on
+  // `ProjectPhotosController.Upload`) — see `services/outbox/errors.ts`'s remarks on which of these
+  // are treated as a terminal outbox conflict versus an ordinary retryable failure.
+  IdempotencyPayloadMismatch:
+    'รายการนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้ (คีย์ซ้ำแต่เนื้อหาต่างกัน) ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบรายการนี้',
+  'idempotency-payload-mismatch':
+    'รายการนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้ (คีย์ซ้ำแต่เนื้อหาต่างกัน) ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบรายการนี้',
+  IdempotencyRequestInProgress: 'มีการส่งรายการนี้อยู่แล้วจากอีกอุปกรณ์/แท็บในขณะนี้ กรุณารอสักครู่แล้วลองใหม่',
+  'idempotency-request-in-progress': 'มีการส่งรายการนี้อยู่แล้วจากอีกอุปกรณ์/แท็บในขณะนี้ กรุณารอสักครู่แล้วลองใหม่',
+  IdempotencyResponseNotReplayable:
+    'ไม่สามารถยืนยันผลของรายการนี้ได้ ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบข้อมูลบนระบบก่อนบันทึกใหม่',
+  'idempotency-response-not-replayable':
+    'ไม่สามารถยืนยันผลของรายการนี้ได้ ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบข้อมูลบนระบบก่อนบันทึกใหม่',
+  IdempotencyActorRequired: 'ไม่สามารถระบุตัวตนผู้ใช้งานปัจจุบันได้ กรุณาเข้าสู่ระบบใหม่',
+  'idempotency-actor-required': 'ไม่สามารถระบุตัวตนผู้ใช้งานปัจจุบันได้ กรุณาเข้าสู่ระบบใหม่',
 }
 
 const PHOTO_GENERIC_ERROR_MESSAGE = 'อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
@@ -53,7 +75,7 @@ function toPhotoApiError(error: unknown): PhotoApiError {
     const problem = error.response?.data as ProblemDetails | undefined
     const typeSlug = problem?.type?.split('/').pop()
     const code = (problem?.detail && PHOTO_ERROR_TITLES[problem.detail] ? problem.detail : typeSlug) ?? ''
-    return new PhotoApiError(PHOTO_ERROR_TITLES[code] ?? PHOTO_GENERIC_ERROR_MESSAGE, status)
+    return new PhotoApiError(PHOTO_ERROR_TITLES[code] ?? PHOTO_GENERIC_ERROR_MESSAGE, status, code || undefined)
   }
   return new PhotoApiError(PHOTO_GENERIC_ERROR_MESSAGE)
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { getWbsTree, WbsApiError } from './api'
+import { getWbsTreeWithCacheInfo, WbsApiError } from './api'
 import { flattenWbsTree } from './flattenTree'
 import type { WbsTreeNodeDto } from './types'
 
@@ -27,13 +27,17 @@ export function useWbsTree(projectId: string) {
   const [loadState, setLoadState] = useState<WbsTreeLoadState>('loading')
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set())
+  // S13-FE-02 DoD: "ข้อมูลตารางที่แคชไว้แสดงพร้อมป้าย 'ข้อมูลออฟไลน์'" — true when this data came from
+  // `web/src/sw.ts`'s runtime cache (the network request failed) rather than a live response.
+  const [servedFromOfflineCache, setServedFromOfflineCache] = useState(false)
 
   const load = useCallback(async () => {
     setLoadState('loading')
     setLoadError(null)
     try {
-      const tree = await getWbsTree(projectId)
-      setRootNodes(tree.rootNodes)
+      const result = await getWbsTreeWithCacheInfo(projectId)
+      setRootNodes(result.tree.rootNodes)
+      setServedFromOfflineCache(result.servedFromOfflineCache)
       setLoadState('ready')
     } catch (error) {
       setLoadState('error')
@@ -74,5 +78,6 @@ export function useWbsTree(projectId: string) {
     toggleNode,
     expandAll,
     collapseAll,
+    servedFromOfflineCache,
   }
 }

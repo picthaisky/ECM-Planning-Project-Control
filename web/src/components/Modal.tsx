@@ -124,7 +124,15 @@ export function Modal({ isOpen, onClose, title, children, footer, className }: M
         aria-labelledby={title ? titleId : undefined}
         tabIndex={-1}
         className={cx(
-          'w-full max-w-md rounded-card border border-border bg-surface p-6',
+          // S13-FE-01: `max-h-[90vh] overflow-y-auto` (found via a real Playwright hang, not
+          // theorized) — content taller than the viewport used to leave its own footer/confirm
+          // button permanently unreachable, since `document.body.style.overflow = 'hidden'` (set
+          // below while open) blocks the *page's* scroll and the panel itself had no scroll
+          // mechanism of its own. A tall form (e.g. `WeatherCorrectionModal`'s full field set plus
+          // its correction-reason fieldset) genuinely exceeds a phone-height viewport — the primary
+          // target device for this app's site-facing screens (CLAUDE.md's "mobile-first") — so this
+          // is a real usability fix, not merely a test workaround.
+          'max-h-[90vh] w-full max-w-md overflow-y-auto rounded-card border border-border bg-surface p-6',
           className,
         )}
       >

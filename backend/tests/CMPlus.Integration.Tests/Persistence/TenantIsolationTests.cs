@@ -468,6 +468,35 @@ public class TenantIsolationTests
                 [new ManpowerPlan(
                     tenantId, Guid.NewGuid(), null, Guid.NewGuid(), DateTimeOffset.UtcNow,
                     DateTimeOffset.UtcNow.AddDays(7), plannedWorkerCount: 20, plannedManHours: 160.00m)]),
+
+            // S13-BE-01/S13-DB-01 (ADR-0005 US-13.1) - registered here per this file's own S1-QA-01
+            // DoD comment: a new ITenantOwned entity must never silently fall outside isolation test
+            // coverage. Cross-tenant independence for this specific entity is additionally exercised
+            // end-to-end in EfIdempotencyStoreTests/IdempotencyMiddlewareTests (the same key string
+            // used by two different tenants never collides or leaks).
+            [typeof(IdempotencyKey)] = tenantId => new EntityFixture(
+                [new IdempotencyKey(
+                    tenantId, $"key-{Guid.NewGuid()}", "POST", "/api/v1/projects/x/photos",
+                    new string('a', 64), Guid.NewGuid(), DateTimeOffset.UtcNow)]),
+
+            // S14-BE-01 - registered here per this file's own S1-QA-01 DoD comment: a new
+            // ITenantOwned entity must never silently fall outside isolation test coverage. No
+            // children for the Baseline theory case itself - mirrors CpmRun/EotEvaluation's own
+            // fixtures above (an empty snapshot collection is enough to prove the parent row's own
+            // tenant isolation; the child theory case below covers BaselineActivitySnapshot).
+            [typeof(Baseline)] = tenantId => new EntityFixture(
+                [Domain.Entities.Baseline.Capture(
+                    tenantId, Guid.NewGuid(), "Baseline", DateTimeOffset.UtcNow, Guid.NewGuid(), 1_000_000.00m, [])]),
+
+            // Baseline owns its Snapshots rows (backing-field navigation) - listing the baseline and
+            // its child explicitly here mirrors CpmRun/CpmRunActivity's identical pattern.
+            [typeof(BaselineActivitySnapshot)] = tenantId =>
+            {
+                var baseline = Domain.Entities.Baseline.Capture(
+                    tenantId, Guid.NewGuid(), "Baseline", DateTimeOffset.UtcNow, Guid.NewGuid(), 1_000_000.00m,
+                    [new BaselineActivitySnapshotInput(Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(10), 10, 1_000.00m)]);
+                return new EntityFixture([baseline, .. baseline.Snapshots]);
+            },
         };
 
     /// <summary>

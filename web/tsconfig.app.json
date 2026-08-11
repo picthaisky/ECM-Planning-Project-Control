@@ -25,5 +25,9 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // `src/sw.ts` is built and type-checked separately under `tsconfig.sw.json`'s `["ES2023",
+  // "WebWorker"]` libs (S13-FE-02) — including it here too would conflict with this project's `DOM`
+  // lib (both declare incompatible shapes for e.g. `self`/`Client`/`fetch` event handling).
+  "exclude": ["src/sw.ts"]
 }

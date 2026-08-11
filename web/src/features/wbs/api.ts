@@ -1,5 +1,5 @@
 import { AxiosError } from 'axios'
-import { apiClient } from '../../services/apiClient'
+import { apiClient, isServedFromOfflineCache } from '../../services/apiClient'
 import type { ProblemDetails } from '../auth/types'
 import type {
   ActivityForProgress,
@@ -13,11 +13,17 @@ import type {
  * `features/info/api.ts`'s `ProjectApiError`. */
 export class WbsApiError extends Error {
   readonly status?: number
+  /** Raw backend `ProblemDetails.detail`/type-slug code behind the already-Thai `.message` — S13-FE-01:
+   * `progressOutbox.ts`'s uploader checks this against `IDEMPOTENCY_CONFLICT_CODES` to decide
+   * `OutboxConflictError` vs an ordinary retryable throw. Mirrors `features/photo/api.ts#PhotoApiError.code`
+   * exactly. `undefined` for a non-Axios error. */
+  readonly code?: string
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, code?: string) {
     super(message)
     this.name = 'WbsApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -48,6 +54,22 @@ const WBS_ERROR_TITLES: Record<string, string> = {
   // this Result<T>-shaped failure; this covers the (currently theoretical) case where a proxy/
   // gateway strips `detail` but preserves `type`.
   'cpm-cycle-detected': 'พบการอ้างอิงกิจกรรมแบบวนซ้ำ (Cycle) ไม่สามารถคำนวณตารางเวลาได้',
+
+  // S13-BE-01 `IdempotencyMiddleware` wraps `POST .../progress/batch` too (`[Idempotent]` on
+  // `ProgressController.RecordBatch`) — see `services/outbox/errors.ts`'s remarks on which of these
+  // are a terminal outbox conflict versus an ordinary retryable failure.
+  IdempotencyPayloadMismatch:
+    'ชุดข้อมูลนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้ (คีย์ซ้ำแต่เนื้อหาต่างกัน) ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบรายการนี้',
+  'idempotency-payload-mismatch':
+    'ชุดข้อมูลนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้ (คีย์ซ้ำแต่เนื้อหาต่างกัน) ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบรายการนี้',
+  IdempotencyRequestInProgress: 'มีการส่งชุดข้อมูลนี้อยู่แล้วจากอีกอุปกรณ์/แท็บในขณะนี้ กรุณารอสักครู่แล้วลองใหม่',
+  'idempotency-request-in-progress': 'มีการส่งชุดข้อมูลนี้อยู่แล้วจากอีกอุปกรณ์/แท็บในขณะนี้ กรุณารอสักครู่แล้วลองใหม่',
+  IdempotencyResponseNotReplayable:
+    'ไม่สามารถยืนยันผลของชุดข้อมูลนี้ได้ ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบข้อมูลบนระบบก่อนบันทึกใหม่',
+  'idempotency-response-not-replayable':
+    'ไม่สามารถยืนยันผลของชุดข้อมูลนี้ได้ ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบข้อมูลบนระบบก่อนบันทึกใหม่',
+  IdempotencyActorRequired: 'ไม่สามารถระบุตัวตนผู้ใช้งานปัจจุบันได้ กรุณาเข้าสู่ระบบใหม่',
+  'idempotency-actor-required': 'ไม่สามารถระบุตัวตนผู้ใช้งานปัจจุบันได้ กรุณาเข้าสู่ระบบใหม่',
 }
 
 const WBS_GENERIC_ERROR_MESSAGE = 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
@@ -80,20 +102,35 @@ function toWbsApiError(error: unknown): WbsApiError {
     const code = (problem?.detail && WBS_ERROR_TITLES[problem.detail] ? problem.detail : typeSlug) ?? ''
     // Never falls back to raw `problem.detail`/`problem.title` — see `features/info/api.ts`'s
     // identical comment; an unmapped code always gets the generic Thai message instead.
-    return new WbsApiError(WBS_ERROR_TITLES[code] ?? WBS_GENERIC_ERROR_MESSAGE, status)
+    return new WbsApiError(WBS_ERROR_TITLES[code] ?? WBS_GENERIC_ERROR_MESSAGE, status, code || undefined)
   }
   return new WbsApiError(WBS_GENERIC_ERROR_MESSAGE)
 }
 
+export interface WbsTreeFetchResult {
+  tree: WbsTreeDto
+  /** S13-FE-02: true when `web/src/sw.ts`'s runtime-cache fallback served this response — the WBS
+   * tree is this app's flagship large/virtualized table (ADR-0004), so it is the first screen wired
+   * to the DoD's "ข้อมูลตารางที่แคชไว้แสดงพร้อมป้าย 'ข้อมูลออฟไลน์'" badge; the same one-line pattern
+   * (`isServedFromOfflineCache(response)`) applies to any other table-reading `api.ts` function. */
+  servedFromOfflineCache: boolean
+}
+
 /** `GET /api/v1/projects/{projectId}/wbs-tree` (S4-BE-01) — real, live endpoint. Node-level rollup
  * only (`activityCount`, never the activity list) by design — see `WbsTreeDto`'s doc comment. */
-export async function getWbsTree(projectId: string): Promise<WbsTreeDto> {
+export async function getWbsTreeWithCacheInfo(projectId: string): Promise<WbsTreeFetchResult> {
   try {
     const response = await apiClient.get<WbsTreeDto>(`/projects/${projectId}/wbs-tree`)
-    return response.data
+    return { tree: response.data, servedFromOfflineCache: isServedFromOfflineCache(response) }
   } catch (error) {
     throw toWbsApiError(error)
   }
+}
+
+/** Back-compat wrapper for any caller that only needs the tree itself — `useWbsTree.ts` calls
+ * `getWbsTreeWithCacheInfo` directly instead so it can surface the offline-cache badge. */
+export async function getWbsTree(projectId: string): Promise<WbsTreeDto> {
+  return (await getWbsTreeWithCacheInfo(projectId)).tree
 }
 
 /**
@@ -132,15 +169,21 @@ export async function getNodeActivities(
 
 /** `POST /api/v1/projects/{projectId}/progress/batch` (S4-BE-03) — real, live endpoint. All-or-
  * nothing: either every entry is recorded (`entriesRecorded === entries.length`) or the whole
- * request fails with a `WbsApiError` and nothing is written server-side. */
+ * request fails with a `WbsApiError` and nothing is written server-side.
+ *
+ * `idempotencyKey` (S13-FE-01) is sent as the `Idempotency-Key` header, mirroring
+ * `features/photo/api.ts#uploadPhoto`'s exact pattern — `progressOutbox.ts`'s uploader is the only
+ * caller and always has one (minted at enqueue). */
 export async function batchRecordProgress(
   projectId: string,
   request: BatchProgressRequest,
+  idempotencyKey: string,
 ): Promise<BatchProgressResult> {
   try {
     const response = await apiClient.post<BatchProgressResult>(
       `/projects/${projectId}/progress/batch`,
       request,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     )
     return response.data
   } catch (error) {

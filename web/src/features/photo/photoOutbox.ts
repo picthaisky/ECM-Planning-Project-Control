@@ -1,4 +1,5 @@
-import { uploadPhoto } from './api'
+import { uploadPhoto, PhotoApiError } from './api'
+import { IDEMPOTENCY_CONFLICT_CODES, OutboxConflictError } from '../../services/outbox'
 import type { OutboxUploader } from '../../services/outbox'
 import type { UploadPhotoFields } from './types'
 
@@ -28,12 +29,25 @@ export const uploadPhotoOutboxItem: OutboxUploader<PhotoOutboxPayload> = async (
     throw new Error('ไม่พบไฟล์รูปภาพของรายการนี้ในเครื่อง (อาจถูกล้างแคช) กรุณาถ่ายรูปนี้ใหม่')
   }
 
-  const photo = await uploadPhoto(
-    item.payload.projectId,
-    item.blob,
-    item.payload.fileName,
-    item.payload.fields,
-    item.idempotencyKey,
-  )
-  return { serverId: photo.id }
+  try {
+    const photo = await uploadPhoto(
+      item.payload.projectId,
+      item.blob,
+      item.payload.fileName,
+      item.payload.fields,
+      item.idempotencyKey,
+    )
+    return { serverId: photo.id }
+  } catch (error) {
+    // S13-FE-01: S13-BE-01's `IdempotencyMiddleware` now wraps this endpoint too. A same-key-
+    // different-payload (or non-replayable) 409 means blind retry will never succeed — route it to
+    // the outbox's terminal `conflict` status instead of the ordinary retryable `failed` bucket (see
+    // `services/outbox/errors.ts`). `IdempotencyRequestInProgress` (a transient in-flight collision,
+    // e.g. the sync-status badge racing this page's own auto-sync) is deliberately *not* in that set,
+    // so it falls through and stays a normal retryable failure.
+    if (error instanceof PhotoApiError && error.status === 409 && error.code && IDEMPOTENCY_CONFLICT_CODES.has(error.code)) {
+      throw new OutboxConflictError(error.message)
+    }
+    throw error
+  }
 }

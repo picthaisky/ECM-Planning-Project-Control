@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { batchRecordProgress, WbsApiError } from './api'
+import { useProgressBatchOutbox } from './useProgressBatchOutbox'
 import type { ActivityForProgress } from './types'
 
 export interface ProgressRow {
@@ -29,8 +29,14 @@ function isDecreased(row: ProgressRow): boolean {
 /**
  * Drives the S4-FE-03 "โหมดอัปเดตความคืบหน้า" batch grid (US-4.5): row add/edit/remove, the
  * decrease-confirmation gate ("ยืนยันการปรับลดความคืบหน้า" — a row whose new % is lower than its
- * known current % blocks submission until explicitly confirmed), and the real
- * `POST .../progress/batch` call sharing one `periodEndDate` across every row in the batch.
+ * known current % blocks submission until explicitly confirmed).
+ *
+ * S13-FE-01 (ADR-0005): submission goes through `useProgressBatchOutbox` — the generic IndexedDB
+ * outbox (`services/outbox/`) extended to a third `kind` — rather than calling `batchRecordProgress`
+ * directly, so a batch captured with no signal queues instead of failing outright. `lastResultCount`
+ * therefore now means "rows queued in the most recent submit", not "rows the server confirmed" —
+ * `ProgressUpdatePanel.tsx` reads `outboxItems`/`syncCapability`/`syncNow` (all passed through
+ * unchanged below) for the real, per-item sync status.
  */
 export function useBatchProgressForm(projectId: string) {
   const [rows, setRows] = useState<ProgressRow[]>([])
@@ -40,6 +46,7 @@ export function useBatchProgressForm(projectId: string) {
   const [submitState, setSubmitState] = useState<BatchSubmitState>('idle')
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [lastResultCount, setLastResultCount] = useState<number | null>(null)
+  const outbox = useProgressBatchOutbox(projectId)
 
   const addActivities = useCallback((activities: ActivityForProgress[]) => {
     setRows((prev) => {
@@ -124,8 +131,9 @@ export function useBatchProgressForm(projectId: string) {
   const performSubmit = useCallback(async () => {
     setSubmitState('submitting')
     setSubmitError(null)
+    const queuedCount = rows.length
     try {
-      const result = await batchRecordProgress(projectId, {
+      await outbox.enqueueBatch({
         periodEndDate: new Date(`${periodEndDate}T00:00:00Z`).toISOString(),
         entries: rows.map((r) => ({
           activityId: r.activityId,
@@ -133,18 +141,23 @@ export function useBatchProgressForm(projectId: string) {
           actualQuantity: r.actualQuantity.trim() === '' ? null : r.actualQuantity,
         })),
       })
-      setLastResultCount(result.entriesRecorded)
+      // The count of rows *queued* this submit — not (necessarily yet) server-confirmed; see this
+      // hook's own doc comment. `outboxItems`/`syncCapability` below carry the real per-item state.
+      setLastResultCount(queuedCount)
       setSubmitState('idle')
       setRows([])
       return true
     } catch (error) {
+      // Reachable only if `enqueue` itself fails (e.g. no authenticated session,
+      // `OutboxOwnerRequiredError`) — the write into IndexedDB, unlike the old direct API call, does
+      // not depend on network at all, so an ordinary offline/validation failure never lands here.
       setSubmitState('error')
-      setSubmitError(error instanceof WbsApiError ? error.message : 'บันทึกความคืบหน้าไม่สำเร็จ')
+      setSubmitError(error instanceof Error ? error.message : 'บันทึกความคืบหน้าไม่สำเร็จ')
       return false
     } finally {
       setPendingConfirmation(false)
     }
-  }, [projectId, periodEndDate, rows])
+  }, [periodEndDate, rows, outbox])
 
   /** Called by the submit button. Returns `true` if the batch was sent (or the confirmation modal
    * was opened instead — check `pendingConfirmation`); `false` on a client-side validation
@@ -183,5 +196,11 @@ export function useBatchProgressForm(projectId: string) {
     submitState,
     submitError,
     lastResultCount,
+    // S13-FE-01: this device's own progress-batch outbox queue for this project — real per-item
+    // sync status (`OutboxItem.status`/`lastError`), the Background-Sync-capability banner copy, and
+    // a manual "sync now" the DoD requires never claiming automatic sync where it is not true.
+    outboxItems: outbox.items,
+    syncCapability: outbox.syncCapability,
+    syncNow: outbox.syncNow,
   }
 }

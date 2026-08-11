@@ -44,6 +44,23 @@ const EVM_ERROR_TITLES: Record<string, string> = {
 
   'validation-error': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
   'bad-request': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
+
+  // S14-BE-03 (ProjectErrorCodes): selecting BottomUpEtc/CustomPf as the project default before its
+  // own input has been configured. Reached mainly as defense-in-depth — `EacVariantSelect` already
+  // disables the option itself when `variants[].reason` says the input is unset (S14-FE-02 DoD) —
+  // but the *edge case* `evmSelectors.ts#MISSING_EAC_INPUT_REASON`'s own remarks name (e.g.
+  // `NotStarted` masking the real reason) can still let a click through, so this 400 is surfaced in
+  // Thai rather than left as a raw code, distinct copy from `features/info/api.ts`'s own mapping of
+  // the *same* backend codes (that one covers the opposite direction — clearing the input while its
+  // variant is active).
+  ProjectEacManualEtcRequiredForBottomUpEtc:
+    'ยังไม่ได้กรอกค่าประมาณการงานที่เหลือ (Bottom-Up ETC) จึงยังตั้งเป็นค่าเริ่มต้นของโครงการไม่ได้ — ไปกรอกที่หน้าข้อมูลโครงการ (Project Info) ก่อน',
+  'eac-manual-etc-required-for-bottom-up-etc':
+    'ยังไม่ได้กรอกค่าประมาณการงานที่เหลือ (Bottom-Up ETC) จึงยังตั้งเป็นค่าเริ่มต้นของโครงการไม่ได้ — ไปกรอกที่หน้าข้อมูลโครงการ (Project Info) ก่อน',
+  ProjectEacCustomPerformanceFactorRequiredForCustomPf:
+    'ยังไม่ได้กำหนดตัวคูณผลการดำเนินงานเอง (Custom Performance Factor) จึงยังตั้งเป็นค่าเริ่มต้นของโครงการไม่ได้ — ไปกำหนดที่หน้าข้อมูลโครงการ (Project Info) ก่อน',
+  'eac-custom-performance-factor-required-for-custom-pf':
+    'ยังไม่ได้กำหนดตัวคูณผลการดำเนินงานเอง (Custom Performance Factor) จึงยังตั้งเป็นค่าเริ่มต้นของโครงการไม่ได้ — ไปกำหนดที่หน้าข้อมูลโครงการ (Project Info) ก่อน',
 }
 
 const EVM_GENERIC_ERROR_MESSAGE = 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'

@@ -42,8 +42,8 @@ function variant(overrides: Partial<EacVariantResponseDto>): EacVariantResponseD
 }
 
 describe('UI_EAC_VARIANTS', () => {
-  it('exposes exactly the 3 index-based variants named in S7-FE-02 DoD, in order, never BottomUpEtc/CustomPf', () => {
-    expect(UI_EAC_VARIANTS).toEqual(['CpiBased', 'Atypical', 'CpiSpiBased'])
+  it('S14-FE-02: exposes all 5 engine variants (ADR-0007), index-based first, in this fixed order', () => {
+    expect(UI_EAC_VARIANTS).toEqual(['CpiBased', 'Atypical', 'CpiSpiBased', 'BottomUpEtc', 'CustomPf'])
   })
 })
 

@@ -3,14 +3,14 @@ import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useProjectMasterData } from './useProjectMasterData'
 import * as api from './api'
-import type { Project } from './types'
+import type { Project, ProjectDetail } from './types'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
   return { ...actual, getProject: vi.fn(), updateProject: vi.fn() }
 })
 
-const sampleProject: Project = {
+const sampleProject: ProjectDetail = {
   id: 'project-1',
   name: 'Riverside Condominium Tower B',
   code: 'RCT-B',
@@ -29,6 +29,10 @@ const sampleProject: Project = {
   advanceRecoveryStartPct: null,
   advanceRecoveryRatePct: null,
   advanceRecoveryEndPct: null,
+  eacVariantDefault: 'CpiBased',
+  eacManualEtc: '760000.00',
+  eacCustomPerformanceFactor: '1.2000',
+  eacManualEtcStaleSince: null,
 }
 
 describe('useProjectMasterData', () => {
@@ -71,9 +75,30 @@ describe('useProjectMasterData', () => {
     expect(result.current.project).toEqual(sampleProject)
   })
 
-  it('save() calls updateProject, replaces the project with the response, and exits edit mode', async () => {
+  it('save() calls updateProject, merges the response into the project, and exits edit mode', async () => {
     vi.mocked(api.getProject).mockResolvedValueOnce(sampleProject)
-    const updated = { ...sampleProject, retentionRate: '7.50' }
+    // Mirrors the *real* backend response shape: `ProjectDto` (base `Project` fields only) — never
+    // carries the EAC config fields (see `api.ts#updateProject`'s own remarks).
+    const updated: Project = {
+      id: sampleProject.id,
+      name: sampleProject.name,
+      code: sampleProject.code,
+      owner: sampleProject.owner,
+      contractStart: sampleProject.contractStart,
+      contractFinish: sampleProject.contractFinish,
+      bac: sampleProject.bac,
+      contractValue: sampleProject.contractValue,
+      retentionRate: '7.50',
+      advanceRate: sampleProject.advanceRate,
+      retentionCapPercentage: sampleProject.retentionCapPercentage,
+      retentionRelease1Percentage: sampleProject.retentionRelease1Percentage,
+      defectsLiabilityMonths: sampleProject.defectsLiabilityMonths,
+      advanceAmountPaid: sampleProject.advanceAmountPaid,
+      advanceRecoveryMethod: sampleProject.advanceRecoveryMethod,
+      advanceRecoveryStartPct: sampleProject.advanceRecoveryStartPct,
+      advanceRecoveryRatePct: sampleProject.advanceRecoveryRatePct,
+      advanceRecoveryEndPct: sampleProject.advanceRecoveryEndPct,
+    }
     vi.mocked(api.updateProject).mockResolvedValueOnce(updated)
 
     const { result } = renderHook(() => useProjectMasterData('project-1'))
@@ -104,9 +129,34 @@ describe('useProjectMasterData', () => {
     })
 
     expect(saveResult).toBe(true)
-    expect(result.current.project).toEqual(updated)
+    // The base fields from the response win…
+    expect(result.current.project?.retentionRate).toBe('7.50')
+    // …but the EAC config fields (never returned by `updateProject`) are preserved from the
+    // previously-loaded `ProjectDetail`, never blanked — this is the actual regression this test
+    // protects against (a bare `setProject(updated)` would have wiped them to `undefined`).
+    expect(result.current.project?.eacManualEtc).toBe('760000.00')
+    expect(result.current.project?.eacCustomPerformanceFactor).toBe('1.2000')
+    expect(result.current.project?.eacVariantDefault).toBe('CpiBased')
     expect(result.current.isEditing).toBe(false)
     expect(result.current.saveState).toBe('idle')
+  })
+
+  it('updateEacConfig merges a fresh EAC config into the loaded project (mirrors EacAdvancedInputsCard\'s own save)', async () => {
+    vi.mocked(api.getProject).mockResolvedValueOnce(sampleProject)
+    const { result } = renderHook(() => useProjectMasterData('project-1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() =>
+      result.current.updateEacConfig({
+        eacManualEtc: '900000.00',
+        eacManualEtcStaleSince: null,
+      }),
+    )
+
+    expect(result.current.project?.eacManualEtc).toBe('900000.00')
+    // Untouched fields (base Project fields, and the other EAC field) survive the partial patch.
+    expect(result.current.project?.name).toBe(sampleProject.name)
+    expect(result.current.project?.eacCustomPerformanceFactor).toBe('1.2000')
   })
 
   it('save() keeps edit mode open and surfaces the Thai error on a server rejection', async () => {

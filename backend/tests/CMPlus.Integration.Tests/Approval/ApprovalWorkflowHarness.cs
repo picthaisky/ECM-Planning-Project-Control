@@ -1,6 +1,7 @@
 using CMPlus.Application.Abstractions;
 using CMPlus.Application.Approval;
 using CMPlus.Application.Features.Approval.Commands.UpdateApprovalPolicy;
+using CMPlus.Application.Features.Approval.Queries.GetApprovalPolicyVersionHistory;
 using CMPlus.Application.Features.Payment;
 using CMPlus.Application.Features.Payment.Commands.Approve;
 using CMPlus.Application.Features.Payment.Commands.RecordPayment;
@@ -233,5 +234,19 @@ internal sealed class ApprovalWorkflowHarness
         return await handler.Handle(
             new UpdateApprovalPolicyCommand(documentType, allowSelfApproval, cumulativeVoEscalationPct, cumulativeVoEscalationRole, rules),
             CancellationToken.None);
+    }
+
+    /// <summary>S15-BE-01: reads the version timeline through the real
+    /// <see cref="ApprovalPolicyHistoryReader"/> (composed from <c>ApprovalPolicy</c> + <c>AuditLog</c>
+    /// only) against a real <see cref="CmPlusDbContext"/> wired with the real
+    /// <see cref="AuditSaveChangesInterceptor"/> - so the "who/when" fields in the result come from
+    /// audit rows this same harness's own <see cref="UpdatePolicyAsync"/>/policy-seeding calls
+    /// genuinely produced, not hand-inserted fixtures.</summary>
+    public async Task<Result<IReadOnlyList<ApprovalPolicyVersionHistoryEntryDto>>> GetVersionHistoryAsync(ApprovalDocumentType documentType)
+    {
+        using var context = CreateContext();
+        var handler = new GetApprovalPolicyVersionHistoryQueryHandler(new ApprovalPolicyHistoryReader(context));
+
+        return await handler.Handle(new GetApprovalPolicyVersionHistoryQuery(documentType), CancellationToken.None);
     }
 }

@@ -21,6 +21,28 @@ public sealed class ApprovalPolicyRepository(CmPlusDbContext dbContext) : IAppro
 
     public void AddVersion(ApprovalPolicy policy) => dbContext.ApprovalPolicies.Add(policy);
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        dbContext.SaveChangesAsync(cancellationToken);
+    /// <summary>See <see cref="IApprovalPolicyRepository.SaveChangesAsync"/>'s remarks for the
+    /// concurrent-request race this guards against - the same shape, and the same
+    /// <c>UniqueIndexViolationClassifier</c>, <see cref="BaselineRepository.TryActivateAsync"/> uses.
+    /// Deliberately no transaction wrapper here (unlike that method): this is always exactly one
+    /// <c>SaveChangesAsync</c> call flushing one batch (<c>current.Deactivate()</c> + the new
+    /// <c>Added</c> version, staged by the caller before calling this), so there is nothing to split
+    /// across two round trips the way Baseline's activate/deactivate pair needed - a single
+    /// <c>SaveChangesAsync</c> is already atomic on its own.</summary>
+    public async Task<bool> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return false;
+        }
+        catch (DbUpdateException ex) when (UniqueIndexViolationClassifier.IsUniqueConstraintViolation(ex))
+        {
+            return false;
+        }
+    }
 }

@@ -6,10 +6,11 @@ import type { UserRole } from '../../store/authStore'
 import { EotEvaluationPanel } from './components/EotEvaluationPanel'
 import { WeatherCorrectionModal } from './components/WeatherCorrectionModal'
 import { WeatherLogTable } from './components/WeatherLogTable'
+import { WeatherOutboxQueue } from './components/WeatherOutboxQueue'
 import { WeatherRecordModal } from './components/WeatherRecordModal'
 import { WeatherSummaryTiles } from './components/WeatherSummaryTiles'
 import { useEotEvaluation } from './useEotEvaluation'
-import { useWeatherLogActions } from './useWeatherLogActions'
+import { useWeatherLogOutbox } from './useWeatherLogOutbox'
 import { useWeatherLogs } from './useWeatherLogs'
 import type { WeatherLogDto } from './types'
 
@@ -29,13 +30,22 @@ const EOT_EVALUATE_ROLES: readonly UserRole[] = ['PM', 'Planning', 'QS', 'Admin'
  * (`GET/POST .../weather-logs`, `POST .../weather-logs/{id}/corrections`) + the EOT evaluation panel
  * (`POST .../eot-evaluations`) — see `EotEvaluationPanel.tsx`'s own remarks for the ADR-0020
  * relabelling this screen carries out.
+ *
+ * S13-FE-01 (ADR-0005): both writes now go through `useWeatherLogOutbox` — the generic IndexedDB
+ * outbox (`services/outbox/`) extended to a second `kind` (Original) plus a third
+ * (Correction/Retraction), reusing the H-02 ownership seam unchanged. A write always enqueues first
+ * (never a direct `recordWeatherLog`/`recordWeatherLogCorrection` call from this screen — see
+ * `weatherOutbox.ts`), then attempts an immediate sync when the browser reports online, mirroring
+ * `features/photo/usePhotoOutbox.ts`'s established shape exactly. `useWeatherLogActions.ts` (the
+ * old, direct-API hook this replaces) is retired — keeping it around unused would be exactly the
+ * "bypass the seam" foot-gun a future change could fall into.
  */
 export function WeatherPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const currentUserRole = useAuthStore((state) => state.claims?.role ?? null)
 
   const weatherLogs = useWeatherLogs(projectId ?? '')
-  const actions = useWeatherLogActions(projectId ?? '', () => void weatherLogs.reload())
+  const outbox = useWeatherLogOutbox(projectId ?? '', () => void weatherLogs.reload())
   const eot = useEotEvaluation(projectId ?? '')
 
   const [recordModalOpen, setRecordModalOpen] = useState(false)
@@ -46,9 +56,30 @@ export function WeatherPage() {
 
   const canWrite = currentUserRole !== null && WEATHER_WRITE_ROLES.includes(currentUserRole)
   const canEvaluateEot = currentUserRole !== null && EOT_EVALUATE_ROLES.includes(currentUserRole)
+  const pendingCount = outbox.items.filter((item) => item.status === 'queued' || item.status === 'failed').length
 
   return (
     <div className="flex flex-col gap-4">
+      <div
+        role="status"
+        className="rounded-card border border-border bg-surface px-4 py-3 text-[11.5px] text-text-muted"
+      >
+        {outbox.syncCapability === 'background-sync' ? (
+          <span>
+            อุปกรณ์นี้รองรับการซิงค์อัตโนมัติเบื้องหลัง (Background Sync) — เมื่อเชื่อมต่ออินเทอร์เน็ตอีกครั้ง
+            ระบบจะพยายามซิงค์รายการที่ค้างอยู่ให้อัตโนมัติ
+          </span>
+        ) : (
+          <span>
+            อุปกรณ์นี้ไม่รองรับการซิงค์อัตโนมัติเบื้องหลัง (เช่น iOS/Safari) — ระบบจะซิงค์ให้ทันทีเมื่อเชื่อมต่ออินเทอร์เน็ต
+            <span className="font-semibold"> ขณะเปิดหน้านี้ค้างไว้</span> หรือเมื่อกลับมาเปิดแอปอีกครั้งขณะออนไลน์
+          </span>
+        )}
+        {pendingCount > 0 && (
+          <span className="ml-2 font-medium text-warning-text">รอซิงค์อยู่ {pendingCount} รายการ</span>
+        )}
+      </div>
+
       <WeatherSummaryTiles
         logs={weatherLogs.logs}
         state={weatherLogs.loadState}
@@ -91,16 +122,34 @@ export function WeatherPage() {
         />
       </div>
 
+      <div className="overflow-hidden rounded-card border border-border bg-surface p-4">
+        <div className="flex items-center justify-between">
+          <div className="font-heading text-[13px] font-semibold text-navy">คิวออฟไลน์ของอุปกรณ์นี้ (โครงการนี้)</div>
+          <Button size="sm" variant="secondary" onClick={() => void outbox.syncNow()}>
+            ซิงค์เดี๋ยวนี้
+          </Button>
+        </div>
+        <div className="mt-3">
+          <WeatherOutboxQueue
+            items={outbox.items}
+            correctableLocalOriginals={outbox.correctableLocalOriginals}
+            onRetry={() => void outbox.syncNow()}
+            onRequestCorrection={setCorrectionTarget}
+            canWrite={canWrite}
+          />
+        </div>
+      </div>
+
       <WeatherRecordModal
         isOpen={recordModalOpen}
         onClose={() => {
-          actions.clearActionError()
+          outbox.clearActionError()
           setRecordModalOpen(false)
         }}
-        busy={actions.busyAction === 'record'}
-        errorMessage={actions.actionError}
+        busy={outbox.saving}
+        errorMessage={outbox.actionError}
         onSubmit={(payload) => {
-          void actions.record(payload).then((saved) => {
+          void outbox.recordOriginal(payload).then((saved) => {
             if (saved) setRecordModalOpen(false)
           })
         }}
@@ -111,13 +160,13 @@ export function WeatherPage() {
           isOpen
           target={correctionTarget}
           onClose={() => {
-            actions.clearActionError()
+            outbox.clearActionError()
             setCorrectionTarget(null)
           }}
-          busy={actions.busyAction === 'correct'}
-          errorMessage={actions.actionError}
+          busy={outbox.saving}
+          errorMessage={outbox.actionError}
           onSubmit={(logId, payload) => {
-            void actions.correct(logId, payload).then((saved) => {
+            void outbox.recordCorrection(logId, payload).then((saved) => {
               if (saved) setCorrectionTarget(null)
             })
           }}

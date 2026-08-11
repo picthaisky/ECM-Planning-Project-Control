@@ -367,9 +367,13 @@ namespace CMPlus.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("TenantId", "DocumentType")
+                        .IsUnique()
+                        .HasFilter("[IsActive] = 1 AND [ProjectId] IS NULL");
+
                     b.HasIndex("TenantId", "ProjectId", "DocumentType")
                         .IsUnique()
-                        .HasFilter("[IsActive] = 1");
+                        .HasFilter("[IsActive] = 1 AND [ProjectId] IS NOT NULL");
 
                     b.ToTable("ApprovalPolicies", null, t =>
                         {
@@ -464,6 +468,85 @@ namespace CMPlus.Infrastructure.Migrations
                     b.HasIndex("TenantId", "EntityName", "EntityId");
 
                     b.ToTable("AuditLogs", (string)null);
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.Baseline", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Bac")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTimeOffset>("CapturedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CapturedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("nvarchar(250)");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProjectId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Baselines_TenantId_ProjectId_Active")
+                        .HasFilter("[IsActive] = 1");
+
+                    b.ToTable("Baselines", (string)null);
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.BaselineActivitySnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ActivityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BaselineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("BudgetCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("DurationDays")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("PlannedFinish")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("PlannedStart")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BaselineId");
+
+                    b.HasIndex("TenantId", "BaselineId", "ActivityId")
+                        .IsUnique();
+
+                    b.ToTable("BaselineActivitySnapshots", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_BaselineActivitySnapshots_DurationDays", "[DurationDays] >= 0");
+                        });
                 });
 
             modelBuilder.Entity("CMPlus.Domain.Entities.Calendar", b =>
@@ -1092,6 +1175,74 @@ namespace CMPlus.Infrastructure.Migrations
                     b.ToTable("FileImportJobs", null, t =>
                         {
                             t.HasCheckConstraint("CK_FileImportJobs_RowsImported", "[RowsImported] >= 0");
+                        });
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.IdempotencyKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequestMethod")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("RequestPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("ReservedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ResponseBody")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ResponseContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("ResponseNotReplayable")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("ResponseStatusCode")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Key")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Status", "CompletedAt");
+
+                    b.HasIndex("TenantId", "Status", "ReservedAt");
+
+                    b.ToTable("IdempotencyKeys", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_IdempotencyKeys_ResponseBody_Length", "[ResponseBody] IS NULL OR LEN([ResponseBody]) <= 65536");
                         });
                 });
 
@@ -2138,6 +2289,15 @@ namespace CMPlus.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("CMPlus.Domain.Entities.BaselineActivitySnapshot", b =>
+                {
+                    b.HasOne("CMPlus.Domain.Entities.Baseline", null)
+                        .WithMany("Snapshots")
+                        .HasForeignKey("BaselineId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("CMPlus.Domain.Entities.CalendarException", b =>
                 {
                     b.HasOne("CMPlus.Domain.Entities.Calendar", null)
@@ -2269,6 +2429,11 @@ namespace CMPlus.Infrastructure.Migrations
             modelBuilder.Entity("CMPlus.Domain.Entities.ApprovalPolicy", b =>
                 {
                     b.Navigation("Rules");
+                });
+
+            modelBuilder.Entity("CMPlus.Domain.Entities.Baseline", b =>
+                {
+                    b.Navigation("Snapshots");
                 });
 
             modelBuilder.Entity("CMPlus.Domain.Entities.CpmRun", b =>

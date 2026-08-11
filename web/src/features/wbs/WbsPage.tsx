@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Button } from '../../components'
+import { Button, StatusPill } from '../../components'
 import { RequireRole } from '../../routes'
 import { CriticalPathPreview } from './components/CriticalPathPreview'
 import { searchWbsTree } from './flattenTree'
@@ -65,6 +65,9 @@ export function WbsPage() {
         <Button size="sm" variant="secondary" onClick={tree.collapseAll} disabled={!!search.trim()}>
           ย่อทั้งหมด
         </Button>
+        {/* S13-FE-02 DoD: "ข้อมูลตารางที่แคชไว้แสดงพร้อมป้าย 'ข้อมูลออฟไลน์'" — only ever true when the
+            live request genuinely failed and `web/src/sw.ts` served its last-known copy instead. */}
+        {tree.servedFromOfflineCache && <StatusPill label="ข้อมูลออฟไลน์" tone="warning" />}
 
         <RequireRole allowedRoles={[...PROGRESS_UPDATE_ROLES]}>
           <Button

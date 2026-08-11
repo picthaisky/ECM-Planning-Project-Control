@@ -19,4 +19,17 @@ public static class ProjectErrorCodes
     /// figure (S10-SEC-02 finding M-02) or retroactively rewriting published history. Maps to 409 -
     /// the request is well-formed, it conflicts with the project's current state.</summary>
     public const string BacLockedByApprovedVariationOrders = "ProjectBacLockedByApprovedVariationOrders";
+
+    /// <summary>S14-BE-03: <c>EacVariantDefault</c> is (or is being set to) <c>BottomUpEtc</c> while
+    /// <c>EacManualEtc</c> is not configured - <see cref="CMPlus.Domain.Entities.Project.SetEacVariantDefault"/>/
+    /// <see cref="CMPlus.Domain.Entities.Project.SetEacManualEtc"/>'s shared guard, surfaced by both
+    /// <c>SetEacVariantDefaultCommandHandler</c> (switching TO the variant) and
+    /// <c>SetEacAdvancedInputsCommandHandler</c> (clearing the input while the variant is already
+    /// active) so the invariant cannot be reached from either direction. Maps to 400 - a
+    /// well-formed request the current project state cannot satisfy yet, not a malformed one.</summary>
+    public const string EacManualEtcRequiredForBottomUpEtc = "ProjectEacManualEtcRequiredForBottomUpEtc";
+
+    /// <summary>S14-BE-03: the <see cref="EacManualEtcRequiredForBottomUpEtc"/> pattern applied to
+    /// <c>EacVariantDefault = CustomPf</c> / <c>EacCustomPerformanceFactor</c> instead.</summary>
+    public const string EacCustomPerformanceFactorRequiredForCustomPf = "ProjectEacCustomPerformanceFactorRequiredForCustomPf";
 }

@@ -33,4 +33,12 @@ public static class ApprovalPolicyErrorCodes
     /// dynamic suffix.
     /// </summary>
     public const string BandGapPrefix = "ApprovalPolicyBandGap:";
+
+    /// <summary>Two concurrent <c>PUT .../approval-policies/{documentType}</c> requests both read the
+    /// same pre-race active policy before either committed, then each staged a different
+    /// <c>nextVersion</c> - the same-shape race <c>BaselineErrorCodes.ConcurrencyConflict</c>'s own
+    /// remarks describe for Baseline activation, reachable here via
+    /// <c>IApprovalPolicyRepository.SaveChangesAsync</c> returning <see langword="false"/>. Maps to
+    /// 409; the caller should re-read and retry.</summary>
+    public const string ConcurrencyConflict = "ApprovalPolicyConcurrencyConflict";
 }

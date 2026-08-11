@@ -480,6 +480,107 @@ public class ProjectTests
     }
 
     [Fact]
+    public void SetEacManualEtc_Null_Also_Clears_EacManualEtcStaleSince_When_A_Different_Variant_Is_Active()
+    {
+        // The other half of the "clearing" direction (SetEacManualEtc_Clears_EacManualEtcStaleSince
+        // above only exercises re-entering a fresh non-null value): deliberately clearing the
+        // estimate while it is legal to do so (variant is not BottomUpEtc) must also clear the
+        // staleness flag - "no manual ETC configured" is not itself a stale state.
+        var project = CreateProject();
+        project.SetEacManualEtc(50_000_000.00m);
+        project.ApplyVariationOrderApproval(1_000_000.00m, DateTimeOffset.UtcNow);
+        Assert.NotNull(project.EacManualEtcStaleSince);
+
+        project.SetEacManualEtc(null);
+
+        Assert.Null(project.EacManualEtcStaleSince);
+        Assert.Null(project.EacManualEtc);
+    }
+
+    // ------------------------------------------------------------------------------------
+    // S14-BE-03: BottomUpEtc/CustomPf cannot be selected while their input is unset, and their
+    // input cannot be cleared while they are the active variant - the same invariant approached
+    // from both directions (mirrors ADR-0016's "quorum binds rejection exactly as it binds
+    // approval" discipline).
+    // ------------------------------------------------------------------------------------
+
+    [Fact]
+    public void SetEacVariantDefault_Throws_When_Selecting_BottomUpEtc_Without_EacManualEtc_Configured()
+    {
+        var project = CreateProject(); // EacManualEtc is null by default
+
+        Assert.Throws<DomainException>(() => project.SetEacVariantDefault(EacVariant.BottomUpEtc));
+        Assert.Equal(EacVariant.CpiBased, project.EacVariantDefault); // unchanged
+    }
+
+    [Fact]
+    public void SetEacVariantDefault_Throws_When_Selecting_CustomPf_Without_EacCustomPerformanceFactor_Configured()
+    {
+        var project = CreateProject(); // EacCustomPerformanceFactor is null by default
+
+        Assert.Throws<DomainException>(() => project.SetEacVariantDefault(EacVariant.CustomPf));
+        Assert.Equal(EacVariant.CpiBased, project.EacVariantDefault); // unchanged
+    }
+
+    [Fact]
+    public void SetEacVariantDefault_Succeeds_For_BottomUpEtc_When_EacManualEtc_Is_Already_Configured()
+    {
+        var project = CreateProject();
+        project.SetEacManualEtc(760_000.00m);
+
+        project.SetEacVariantDefault(EacVariant.BottomUpEtc);
+
+        Assert.Equal(EacVariant.BottomUpEtc, project.EacVariantDefault);
+    }
+
+    [Fact]
+    public void SetEacVariantDefault_Succeeds_For_CustomPf_When_EacCustomPerformanceFactor_Is_Already_Configured()
+    {
+        var project = CreateProject();
+        project.SetEacCustomPerformanceFactor(1.20m);
+
+        project.SetEacVariantDefault(EacVariant.CustomPf);
+
+        Assert.Equal(EacVariant.CustomPf, project.EacVariantDefault);
+    }
+
+    [Fact]
+    public void SetEacManualEtc_Throws_When_Clearing_While_BottomUpEtc_Is_The_Active_Variant()
+    {
+        var project = CreateProject();
+        project.SetEacManualEtc(760_000.00m);
+        project.SetEacVariantDefault(EacVariant.BottomUpEtc);
+
+        Assert.Throws<DomainException>(() => project.SetEacManualEtc(null));
+        Assert.Equal(760_000.00m, project.EacManualEtc); // unchanged
+    }
+
+    [Fact]
+    public void SetEacCustomPerformanceFactor_Throws_When_Clearing_While_CustomPf_Is_The_Active_Variant()
+    {
+        var project = CreateProject();
+        project.SetEacCustomPerformanceFactor(1.20m);
+        project.SetEacVariantDefault(EacVariant.CustomPf);
+
+        Assert.Throws<DomainException>(() => project.SetEacCustomPerformanceFactor(null));
+        Assert.Equal(1.20m, project.EacCustomPerformanceFactor); // unchanged
+    }
+
+    [Fact]
+    public void SetEacManualEtc_Can_Be_Cleared_Once_The_Variant_Has_Switched_Away_From_BottomUpEtc()
+    {
+        // The intended recovery path: switch the variant first, then the input is free to clear.
+        var project = CreateProject();
+        project.SetEacManualEtc(760_000.00m);
+        project.SetEacVariantDefault(EacVariant.BottomUpEtc);
+
+        project.SetEacVariantDefault(EacVariant.CpiBased);
+        project.SetEacManualEtc(null);
+
+        Assert.Null(project.EacManualEtc);
+    }
+
+    [Fact]
     public void Constructor_Rejects_Negative_Bac()
     {
         Assert.Throws<DomainException>(() => Project.Create(

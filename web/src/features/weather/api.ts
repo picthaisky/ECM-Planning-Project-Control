@@ -15,11 +15,17 @@ import type {
  * type, same discipline `features/vo/api.ts` uses for its own reused Sprint-2 approval codes. */
 export class WeatherApiError extends Error {
   readonly status?: number
+  /** Raw backend `ProblemDetails.detail`/type-slug code behind the already-Thai `.message` — S13-FE-01:
+   * `weatherOutbox.ts`'s uploaders check this against `IDEMPOTENCY_CONFLICT_CODES` to decide
+   * `OutboxConflictError` vs an ordinary retryable throw. Mirrors `features/photo/api.ts#PhotoApiError.code`
+   * exactly. `undefined` for a non-Axios error. */
+  readonly code?: string
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, code?: string) {
     super(message)
     this.name = 'WeatherApiError'
     this.status = status
+    this.code = code
   }
 }
 
@@ -83,6 +89,23 @@ const WEATHER_ERROR_TITLES: Record<string, string> = {
 
   'validation-error': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
   'bad-request': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
+
+  // S13-BE-01 `IdempotencyMiddleware` wraps both weather-log write actions
+  // (`[Idempotent]` on `ProjectWeatherLogsController.Record`/`RecordCorrection`) — see
+  // `services/outbox/errors.ts`'s remarks on which of these are a terminal outbox conflict versus an
+  // ordinary retryable failure.
+  IdempotencyPayloadMismatch:
+    'รายการนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้ (คีย์ซ้ำแต่เนื้อหาต่างกัน) ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบรายการนี้',
+  'idempotency-payload-mismatch':
+    'รายการนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้ (คีย์ซ้ำแต่เนื้อหาต่างกัน) ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบรายการนี้',
+  IdempotencyRequestInProgress: 'มีการส่งรายการนี้อยู่แล้วจากอีกอุปกรณ์/แท็บในขณะนี้ กรุณารอสักครู่แล้วลองใหม่',
+  'idempotency-request-in-progress': 'มีการส่งรายการนี้อยู่แล้วจากอีกอุปกรณ์/แท็บในขณะนี้ กรุณารอสักครู่แล้วลองใหม่',
+  IdempotencyResponseNotReplayable:
+    'ไม่สามารถยืนยันผลของรายการนี้ได้ ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบข้อมูลบนระบบก่อนบันทึกใหม่',
+  'idempotency-response-not-replayable':
+    'ไม่สามารถยืนยันผลของรายการนี้ได้ ระบบจะไม่ลองส่งซ้ำให้อัตโนมัติอีก กรุณาตรวจสอบข้อมูลบนระบบก่อนบันทึกใหม่',
+  IdempotencyActorRequired: 'ไม่สามารถระบุตัวตนผู้ใช้งานปัจจุบันได้ กรุณาเข้าสู่ระบบใหม่',
+  'idempotency-actor-required': 'ไม่สามารถระบุตัวตนผู้ใช้งานปัจจุบันได้ กรุณาเข้าสู่ระบบใหม่',
 }
 
 const WEATHER_GENERIC_ERROR_MESSAGE = 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
@@ -95,7 +118,7 @@ function toWeatherApiError(error: unknown): WeatherApiError {
     const code = (problem?.detail && WEATHER_ERROR_TITLES[problem.detail] ? problem.detail : typeSlug) ?? ''
     // Never falls back to raw `problem.detail`/`problem.title` — see `features/vo/api.ts`'s
     // identical comment; an unmapped code always gets the generic Thai message instead.
-    return new WeatherApiError(WEATHER_ERROR_TITLES[code] ?? WEATHER_GENERIC_ERROR_MESSAGE, status)
+    return new WeatherApiError(WEATHER_ERROR_TITLES[code] ?? WEATHER_GENERIC_ERROR_MESSAGE, status, code || undefined)
   }
   return new WeatherApiError(WEATHER_GENERIC_ERROR_MESSAGE)
 }
@@ -129,10 +152,21 @@ export async function listWeatherLogs(
 /** `POST /api/v1/projects/{projectId}/weather-logs` (S11-BE-01) — real, live endpoint. Creates an
  * `EntryKind = Original` entry. **There is no update/delete for this resource** — see
  * `WeatherRecordModal.tsx`'s mandatory pre-confirm warning, which is the actual DoD requirement
- * this endpoint's one-way nature exists to satisfy. */
-export async function recordWeatherLog(projectId: string, payload: RecordWeatherLogPayload): Promise<WeatherLogDto> {
+ * this endpoint's one-way nature exists to satisfy.
+ *
+ * `idempotencyKey` (S13-FE-01) is sent as the `Idempotency-Key` header, mirroring
+ * `features/photo/api.ts#uploadPhoto`'s exact pattern — required (not optional) so a caller cannot
+ * silently forget it the way an optional parameter invites; `weatherOutbox.ts`'s uploader is the only
+ * caller and always has one (minted at enqueue, `services/outbox/outboxStore.ts#enqueue`). */
+export async function recordWeatherLog(
+  projectId: string,
+  payload: RecordWeatherLogPayload,
+  idempotencyKey: string,
+): Promise<WeatherLogDto> {
   try {
-    const response = await apiClient.post<WeatherLogDto>(`/projects/${projectId}/weather-logs`, payload)
+    const response = await apiClient.post<WeatherLogDto>(`/projects/${projectId}/weather-logs`, payload, {
+      headers: { 'Idempotency-Key': idempotencyKey },
+    })
     return response.data
   } catch (error) {
     throw toWeatherApiError(error)
@@ -142,16 +176,20 @@ export async function recordWeatherLog(projectId: string, payload: RecordWeather
 /** `POST /api/v1/projects/{projectId}/weather-logs/{logId}/corrections` (S11-BE-01) — real, live
  * endpoint. `logId` must be the current chain tail (domain-rules.md §8.2 rule 2/3) — a stale target
  * fails with `WeatherLogAlreadySuperseded` (409), which the caller should treat as "reload and pick
- * the new tail", not retry blindly. */
+ * the new tail", not retry blindly.
+ *
+ * `idempotencyKey` (S13-FE-01) — see `recordWeatherLog`'s identical remarks. */
 export async function recordWeatherLogCorrection(
   projectId: string,
   logId: string,
   payload: RecordWeatherLogCorrectionPayload,
+  idempotencyKey: string,
 ): Promise<WeatherLogDto> {
   try {
     const response = await apiClient.post<WeatherLogDto>(
       `/projects/${projectId}/weather-logs/${logId}/corrections`,
       payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     )
     return response.data
   } catch (error) {

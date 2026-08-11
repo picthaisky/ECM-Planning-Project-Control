@@ -1,3 +1,4 @@
+import { OutboxConflictError } from './errors'
 import type { OutboxStore } from './outboxStore'
 import type { OutboxItem } from './types'
 
@@ -12,11 +13,16 @@ export interface SyncEngineOptions {
   uploaders: Record<string, OutboxUploader>
   onItemSynced?: (item: OutboxItem) => void
   onItemFailed?: (item: OutboxItem, error: unknown) => void
+  /** S13-FE-01: called when an uploader throws `OutboxConflictError` — see that type's doc comment. */
+  onItemConflicted?: (item: OutboxItem, error: unknown) => void
 }
 
 export interface FlushResult {
   synced: number
   failed: number
+  /** S13-FE-01: items moved to the terminal `'conflict'` status this pass — see
+   * `errors.ts#OutboxConflictError`. Not a subset of `failed`. */
+  conflicted: number
   /** Items whose `kind` has no registered uploader — left `queued`, not counted as `failed` (a
    * missing uploader is a programming error to fix, not a transient network failure to retry into
    * the same failed-with-backoff bucket). */
@@ -43,17 +49,18 @@ function toErrorMessage(error: unknown): string {
  * running) from double-uploading the same item.
  */
 export function createSyncEngine(options: SyncEngineOptions) {
-  const { store, uploaders, onItemSynced, onItemFailed } = options
+  const { store, uploaders, onItemSynced, onItemFailed, onItemConflicted } = options
   let syncing = false
 
   async function flush(): Promise<FlushResult> {
     if (syncing) {
-      return { synced: 0, failed: 0, skippedUnknownKind: 0 }
+      return { synced: 0, failed: 0, conflicted: 0, skippedUnknownKind: 0 }
     }
 
     syncing = true
     let synced = 0
     let failed = 0
+    let conflicted = 0
     let skippedUnknownKind = 0
 
     try {
@@ -74,13 +81,22 @@ export function createSyncEngine(options: SyncEngineOptions) {
           onItemSynced?.({ ...item, status: 'synced', serverId: result.serverId })
         } catch (error) {
           const message = toErrorMessage(error)
-          await store.markFailed(item.id, message)
-          failed += 1
-          onItemFailed?.({ ...item, status: 'failed', lastError: message }, error)
+          if (error instanceof OutboxConflictError) {
+            // S13-FE-01: a same-key-different-payload (or non-replayable) 409 — the queued item
+            // disagrees with what the server already accepted, so blind retry is never scheduled for
+            // it again (see `errors.ts#OutboxConflictError`, `outboxStore.ts#markConflict`).
+            await store.markConflict(item.id, message)
+            conflicted += 1
+            onItemConflicted?.({ ...item, status: 'conflict', lastError: message }, error)
+          } else {
+            await store.markFailed(item.id, message)
+            failed += 1
+            onItemFailed?.({ ...item, status: 'failed', lastError: message }, error)
+          }
         }
       }
 
-      return { synced, failed, skippedUnknownKind }
+      return { synced, failed, conflicted, skippedUnknownKind }
     } finally {
       syncing = false
     }

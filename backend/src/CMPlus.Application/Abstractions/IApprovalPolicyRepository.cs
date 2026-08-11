@@ -32,9 +32,44 @@ public interface IApprovalPolicyRepository
     /// Persists the staged new version and, when <see cref="FindActiveTenantDefaultAsync"/> returned
     /// a previous version that was subsequently <see cref="ApprovalPolicy.Deactivate"/>d, that
     /// deactivation - both in the same atomic <c>SaveChanges</c> call, so a reader can never
-    /// observe two simultaneously-active versions of the same policy (design.md §3's unique
-    /// filtered index on <c>(TenantId, ProjectId, DocumentType) WHERE IsActive = 1</c> would reject
-    /// exactly that if it were somehow attempted).
+    /// observe two simultaneously-active versions of the same policy in the ordinary, single-request
+    /// case.
+    ///
+    /// <para><b>Same-shape concurrent-request race as <c>IBaselineRepository.TryActivateAsync</c>
+    /// (see that method's remarks for the full mechanism) - found during the Baseline fix's own
+    /// review, since <see cref="ApprovalPolicyConfiguration"/> ships the identical
+    /// `(TenantId, ProjectId, DocumentType) WHERE IsActive = 1` filtered-unique-index shape.</b> Two
+    /// concurrent <c>PUT .../approval-policies/{documentType}</c> requests can each call
+    /// <see cref="FindActiveTenantDefaultAsync"/> and observe the same pre-race active policy before
+    /// either commits, then each stage a different <c>nextVersion</c> via <see cref="AddVersion"/> -
+    /// whichever commits second collides with the first's already-committed active row on the real
+    /// unique index. Returns <see langword="false"/> (never lets the raw
+    /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> escape) when this specific
+    /// collision - classified by <c>Infrastructure.Persistence.UniqueIndexViolationClassifier</c>,
+    /// the same helper <c>BaselineRepository.TryActivateAsync</c> uses - or a genuine
+    /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException"/> occurs;
+    /// <see langword="true"/> on an ordinary successful save. Any other
+    /// <see cref="Microsoft.EntityFrameworkCore.DbUpdateException"/> shape still propagates unhandled,
+    /// unchanged - see that classifier's remarks for why a bare
+    /// <c>catch (DbUpdateException)</c> would be unsafe.</para>
+    ///
+    /// <para><b>ADR-0021, closed 2026-08-11 (Sprint 15 approval-policy hardening):</b> this used to
+    /// NOT close the race for every <see cref="ApprovalPolicy"/> that exists today, because every
+    /// policy <c>UpdateApprovalPolicyCommandHandler</c> actually creates has
+    /// <see cref="ApprovalPolicy.ProjectId"/> <see langword="null"/> (tenant-wide default is the only
+    /// exposed write surface - project-scoped override is schema-present but "not surfaced until a
+    /// later sprint", see that property's own remarks), and standard SQL unique-index semantics
+    /// (ANSI, not a SQLite quirk) treat NULL as never equal to another NULL, so the old single index
+    /// `(TenantId, ProjectId, DocumentType) WHERE IsActive = 1` provided <b>no protection whatsoever</b>
+    /// when both competing rows had <c>ProjectId = null</c>. <see cref="Configurations.ApprovalPolicyConfiguration"/>
+    /// now ships <b>two</b> filtered unique indexes split on <c>ProjectId</c> nullability - `(TenantId,
+    /// DocumentType) WHERE IsActive = 1 AND ProjectId IS NULL` and `(TenantId, ProjectId, DocumentType)
+    /// WHERE IsActive = 1 AND ProjectId IS NOT NULL` - so every index's key columns are non-null
+    /// wherever its filter applies and the classifier above now catches the null-<c>ProjectId</c> race
+    /// too, exactly like the non-null case. Proven directly in
+    /// <c>ApprovalPolicyActivationConcurrencySqliteTests.Tenant_Wide_Default_Policy_ProjectId_Is_Null_The_Split_Index_Now_Rejects_A_Second_Simultaneously_Active_Version</c>,
+    /// with a red-first mutation-proof companion test reproducing the old, broken behaviour against a
+    /// locally-replicated pre-fix schema in the same test run.</para>
     /// </summary>
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+    Task<bool> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

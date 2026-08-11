@@ -16,8 +16,12 @@
  */
 
 /** `queued` -> `syncing` -> `synced` (terminal) or -> `failed` (retryable, back to `queued` semantics
- * on the next flush — see `syncEngine.ts`, which treats `failed` and `queued` identically as "pending"). */
-export type OutboxItemStatus = 'queued' | 'syncing' | 'synced' | 'failed'
+ * on the next flush — see `syncEngine.ts`, which treats `failed` and `queued` identically as
+ * "pending") or -> `conflict` (terminal, S13-FE-01/`errors.ts#OutboxConflictError`: the server's
+ * `Idempotency-Key` reservation says this exact queued payload will never succeed, so it is
+ * deliberately *not* retried automatically — `PENDING_STATUSES` in `outboxStore.ts` excludes it on
+ * purpose). */
+export type OutboxItemStatus = 'queued' | 'syncing' | 'synced' | 'failed' | 'conflict'
 
 /**
  * Identifies the session that owns an outbox record (Sprint 12 security review H-02). Captured once

@@ -1,13 +1,17 @@
 import { AxiosError, AxiosHeaders } from 'axios'
 import type { InternalAxiosRequestConfig } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { batchRecordProgress, getNodeActivities, getWbsTree, recalculateCpm, WbsApiError } from './api'
+import { batchRecordProgress, getNodeActivities, getWbsTree, getWbsTreeWithCacheInfo, recalculateCpm, WbsApiError } from './api'
 import { apiClient } from '../../services/apiClient'
 import type { RecalculateCpmResult, WbsTreeDto } from './types'
 
-vi.mock('../../services/apiClient', () => ({
-  apiClient: { get: vi.fn(), post: vi.fn() },
-}))
+// Partial mock (`importActual` + spread) rather than replacing the whole module — `wbs/api.ts` also
+// imports the real, pure `isServedFromOfflineCache` from this module (S13-FE-02) and must keep using
+// it, not `undefined`.
+vi.mock('../../services/apiClient', async () => {
+  const actual = await vi.importActual<typeof import('../../services/apiClient')>('../../services/apiClient')
+  return { ...actual, apiClient: { get: vi.fn(), post: vi.fn() } }
+})
 
 function makeConfig(url: string): InternalAxiosRequestConfig {
   return { url, headers: new AxiosHeaders() } as InternalAxiosRequestConfig
@@ -83,6 +87,32 @@ describe('features/wbs/api', () => {
     })
   })
 
+  describe('getWbsTreeWithCacheInfo (S13-FE-02)', () => {
+    it('reports servedFromOfflineCache: false for an ordinary live response', async () => {
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: sampleTree, headers: {} })
+
+      const result = await getWbsTreeWithCacheInfo('project-1')
+
+      expect(result).toEqual({ tree: sampleTree, servedFromOfflineCache: false })
+    })
+
+    it('reports servedFromOfflineCache: true when the response carries the service worker\'s cache-fallback header', async () => {
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: sampleTree, headers: { 'x-cm-served-from': 'sw-cache' } })
+
+      const result = await getWbsTreeWithCacheInfo('project-1')
+
+      expect(result).toEqual({ tree: sampleTree, servedFromOfflineCache: true })
+    })
+
+    it('getWbsTree (back-compat wrapper) still returns the bare tree, unaffected by the cache header', async () => {
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: sampleTree, headers: { 'x-cm-served-from': 'sw-cache' } })
+
+      const result = await getWbsTree('project-1')
+
+      expect(result).toEqual(sampleTree)
+    })
+  })
+
   describe('getNodeActivities (pending backend endpoint)', () => {
     it('requests the node-scoped activities path', async () => {
       vi.mocked(apiClient.get).mockResolvedValueOnce({ data: [] })
@@ -100,18 +130,26 @@ describe('features/wbs/api', () => {
   })
 
   describe('batchRecordProgress', () => {
-    it('posts the batch to the real endpoint and returns the entriesRecorded summary', async () => {
+    it('posts the batch to the real endpoint with the Idempotency-Key header and returns the entriesRecorded summary', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { entriesRecorded: 2 } })
 
-      const result = await batchRecordProgress('project-1', {
-        periodEndDate: '2026-07-27T00:00:00.000Z',
-        entries: [{ activityId: 'a1', progressPercentage: '50.00', actualQuantity: null }],
-      })
+      const result = await batchRecordProgress(
+        'project-1',
+        {
+          periodEndDate: '2026-07-27T00:00:00.000Z',
+          entries: [{ activityId: 'a1', progressPercentage: '50.00', actualQuantity: null }],
+        },
+        'idem-key-1',
+      )
 
-      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/progress/batch', {
-        periodEndDate: '2026-07-27T00:00:00.000Z',
-        entries: [{ activityId: 'a1', progressPercentage: '50.00', actualQuantity: null }],
-      })
+      expect(apiClient.post).toHaveBeenCalledWith(
+        '/projects/project-1/progress/batch',
+        {
+          periodEndDate: '2026-07-27T00:00:00.000Z',
+          entries: [{ activityId: 'a1', progressPercentage: '50.00', actualQuantity: null }],
+        },
+        { headers: { 'Idempotency-Key': 'idem-key-1' } },
+      )
       expect(result).toEqual({ entriesRecorded: 2 })
     })
 
@@ -124,7 +162,7 @@ describe('features/wbs/api', () => {
       )
 
       await expect(
-        batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }),
+        batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }, 'idem-key-x'),
       ).rejects.toMatchObject({
         message: 'พบรหัสกิจกรรมที่ไม่อยู่ในโครงการนี้ กรุณาตรวจสอบรายการอีกครั้ง',
       })
@@ -145,7 +183,7 @@ describe('features/wbs/api', () => {
       )
 
       await expect(
-        batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }),
+        batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }, 'idem-key-x'),
       ).rejects.toMatchObject({
         name: 'WbsApiError',
         message: 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
@@ -159,7 +197,7 @@ describe('features/wbs/api', () => {
       vi.mocked(apiClient.post).mockRejectedValueOnce(networkError)
 
       await expect(
-        batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }),
+        batchRecordProgress('project-1', { periodEndDate: '2026-07-27T00:00:00.000Z', entries: [] }, 'idem-key-x'),
       ).rejects.toMatchObject({
         name: 'WbsApiError',
         message: 'ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง',

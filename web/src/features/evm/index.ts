@@ -22,6 +22,8 @@ export {
   VARIANT_ASSUMPTION_LABELS,
   VARIANT_FORMULA_LABELS,
   EAC_NULL_REASON_LABELS,
+  MISSING_EAC_INPUT_REASON,
+  EVM_WARNING_LABELS,
   buildSCurvePoints,
   findVariantResult,
   resolveTcpi,

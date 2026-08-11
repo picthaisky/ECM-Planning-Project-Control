@@ -70,7 +70,10 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
  * `web/src/services/outbox/`) and the Man/Equipment KPI/histogram/PI screen
  * (`web/src/features/maneq/`); both real, live endpoints, with the specific list/catalogue gaps on
  * the Sprint 12 backend documented at each feature's own call sites (`features/photo/PhotoPage.tsx`,
- * `features/maneq/ManeqPage.tsx`). */
+ * `features/maneq/ManeqPage.tsx`). `baseline` added S14-FE-01 (US-14.1/US-14.2) — capture/activate
+ * and the current-vs-baseline comparison table (`web/src/features/baseline/`); capture/activate/
+ * compare are all real, live endpoints, with the missing list-baselines gap documented at
+ * `features/baseline/api.ts#listBaselines`'s own remarks. */
 export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
   'dashboard',
   'info',
@@ -84,4 +87,5 @@ export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
   'weather',
   'maneq',
   'issue',
+  'baseline',
 ])

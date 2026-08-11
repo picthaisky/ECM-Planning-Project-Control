@@ -10,6 +10,10 @@ export type { StatTileProps, StatTileTone, StatTileState } from './StatTile'
 export { StatusPill } from './StatusPill'
 export type { StatusPillProps, StatusPillTone } from './StatusPill'
 export { resolveStatusTone } from './statusTone'
+export { OUTBOX_STATUS_LABELS, OUTBOX_STATUS_TONES } from './outboxStatusLabels'
+
+export { SyncStatusBadge } from './SyncStatusBadge'
+export type { SyncStatusBadgeProps } from './SyncStatusBadge'
 
 export { ChartCard } from './ChartCard'
 export type { ChartCardProps, ChartCardState } from './ChartCard'
@@ -23,3 +27,4 @@ export type {
 } from './DataTable'
 
 export { ToastViewport } from './Toast'
+export { UpdateAvailableBanner } from './UpdateAvailableBanner'

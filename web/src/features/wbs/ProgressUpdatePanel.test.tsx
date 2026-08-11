@@ -1,16 +1,31 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import 'fake-indexeddb/auto'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ProgressUpdatePanel } from './ProgressUpdatePanel'
 import { useBatchProgressForm } from './useBatchProgressForm'
 import * as api from './api'
 import { WbsApiError } from './api'
+import { useAuthStore } from '../../store/authStore'
 import type { ProgressRow } from './useBatchProgressForm'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
   return { ...actual, batchRecordProgress: vi.fn() }
 })
+
+/** S13-FE-01: submission now enqueues into the real (fake-indexeddb-polyfilled) `cmplus-outbox`
+ * database before syncing — mirrors `features/photo/usePhotoOutbox.test.ts`'s identical reset
+ * helper, needed to isolate the "real hook wired in" tests below under the fixed production
+ * database name. */
+function resetOutboxDatabase(): Promise<void> {
+  return new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase('cmplus-outbox')
+    request.onsuccess = () => resolve()
+    request.onerror = () => resolve()
+    request.onblocked = () => resolve()
+  })
+}
 
 /**
  * S4-QA-03 (docs/10 §6): direct component coverage for the batch-progress grid
@@ -43,6 +58,9 @@ function makeForm(overrides: Partial<BatchForm> = {}): BatchForm {
     submitState: 'idle',
     submitError: null,
     lastResultCount: null,
+    outboxItems: [],
+    syncCapability: 'fallback-only',
+    syncNow: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -174,11 +192,11 @@ describe('ProgressUpdatePanel', () => {
     )
   })
 
-  it('shows a success status message after a submit that cleared the grid', () => {
+  it('shows a "queued" status message after a submit that cleared the grid (S13-FE-01: enqueued, not yet necessarily synced)', () => {
     const form = makeForm({ rows: [], submitState: 'idle', lastResultCount: 20 })
     render(<ProgressUpdatePanel form={form} />)
 
-    expect(screen.getByRole('status')).toHaveTextContent('บันทึกความคืบหน้าสำเร็จ 20 รายการ')
+    expect(screen.getByRole('status')).toHaveTextContent('คิวไว้แล้ว 20 รายการ (รอซิงค์)')
   })
 
   it('clicking the submit button calls form.attemptSubmit', async () => {
@@ -277,9 +295,22 @@ describe('ProgressUpdatePanel', () => {
     })
   })
 
-  describe('error states with the real hook wired in (not a hand-built form object)', () => {
-    beforeEach(() => {
+  describe('S13-FE-01: real hook wired in (not a hand-built form object) — always outbox, never a direct call', () => {
+    beforeEach(async () => {
+      await resetOutboxDatabase()
       vi.mocked(api.batchRecordProgress).mockReset()
+      useAuthStore.getState().login({
+        accessToken: 'jwt',
+        expiresAt: '2027-01-01T00:00:00+07:00',
+        userId: 'user-1',
+        tenantId: 'tenant-1',
+        role: 'PM',
+      })
+    })
+
+    afterEach(async () => {
+      useAuthStore.getState().logout()
+      await resetOutboxDatabase()
     })
 
     function RealPanel() {
@@ -287,10 +318,11 @@ describe('ProgressUpdatePanel', () => {
       return <ProgressUpdatePanel form={form} />
     }
 
-    it('a server validation error surfaces as an alert and preserves the rows (does not clear the grid)', async () => {
-      vi.mocked(api.batchRecordProgress).mockRejectedValueOnce(
-        new WbsApiError('พบรหัสกิจกรรมที่ไม่อยู่ในโครงการนี้ กรุณาตรวจสอบรายการอีกครั้ง', 400),
-      )
+    it('submitting enqueues immediately and clears the grid, regardless of what the server will eventually say (ADR-0005: enqueue always happens first)', async () => {
+      // Never resolves within this test — proves the grid clears on *enqueue*, not on a server round
+      // trip (the old, direct-API behaviour this replaces required a resolved/rejected promise to
+      // reach either branch at all).
+      vi.mocked(api.batchRecordProgress).mockReturnValue(new Promise(() => {}))
       const user = userEvent.setup()
       render(<RealPanel />)
 
@@ -300,28 +332,18 @@ describe('ProgressUpdatePanel', () => {
       )
       await user.click(screen.getByRole('button', { name: '+ เพิ่ม' }))
       await user.type(screen.getByLabelText('วันที่ของงวดข้อมูล (Period End Date)'), '2026-07-27')
-      await user.type(
-        screen.getByLabelText(/% ความคืบหน้าใหม่ของ/),
-        '50',
-      )
+      await user.type(screen.getByLabelText(/% ความคืบหน้าใหม่ของ/), '50')
 
       await user.click(screen.getByRole('button', { name: 'ส่งข้อมูลความคืบหน้า' }))
 
-      await waitFor(() =>
-        expect(screen.getByRole('alert')).toHaveTextContent('พบรหัสกิจกรรมที่ไม่อยู่ในโครงการนี้'),
-      )
-      expect(screen.getByText('11111111-1111-1111-1111-111111111111')).toBeInTheDocument() // row still there
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('คิวไว้แล้ว 1 รายการ'))
+      expect(screen.queryByText('11111111-1111-1111-1111-111111111111')).not.toBeInTheDocument() // grid cleared
+      expect(screen.getByTestId('progress-outbox-item')).toBeInTheDocument() // now visible in the queue instead
     })
 
-    it('a genuine network failure (the api layer\'s generic, status-less WbsApiError) surfaces the generic Thai message and preserves the rows', async () => {
-      // This is the exact shape `features/wbs/api.ts`'s `toWbsApiError` produces when a request
-      // never gets an HTTP response at all (no connectivity/timeout) - see
-      // `api.test.ts`'s dedicated "no response" test for that mapping itself. Here the concern is
-      // different: proving the *panel*, wired to the *real* hook, renders that outcome correctly
-      // rather than just trusting the hook-level test (`useBatchProgressForm.test.ts`) which never
-      // renders any DOM at all.
+    it('a batch that fails to sync (server rejects) surfaces its real Thai error in the offline queue, not as a blocking form error', async () => {
       vi.mocked(api.batchRecordProgress).mockRejectedValueOnce(
-        new WbsApiError('ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'),
+        new WbsApiError('พบรหัสกิจกรรมที่ไม่อยู่ในโครงการนี้ กรุณาตรวจสอบรายการอีกครั้ง', 400, 'ProgressUnknownActivity'),
       )
       const user = userEvent.setup()
       render(<RealPanel />)
@@ -332,17 +354,20 @@ describe('ProgressUpdatePanel', () => {
       )
       await user.click(screen.getByRole('button', { name: '+ เพิ่ม' }))
       await user.type(screen.getByLabelText('วันที่ของงวดข้อมูล (Period End Date)'), '2026-07-27')
-      await user.type(
-        screen.getByLabelText(/% ความคืบหน้าใหม่ของ/),
-        '50',
-      )
+      await user.type(screen.getByLabelText(/% ความคืบหน้าใหม่ของ/), '50')
 
       await user.click(screen.getByRole('button', { name: 'ส่งข้อมูลความคืบหน้า' }))
 
+      // The batch is queued (and the row-editing grid cleared) well before the API call resolves —
+      // there is no `form.submitError`/blocking alert path for this outcome any more.
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('คิวไว้แล้ว 1 รายการ'))
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      // Once the (mocked) server rejects it, the real Thai message appears against the queued item.
       await waitFor(() =>
-        expect(screen.getByRole('alert')).toHaveTextContent('ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'),
+        expect(screen.getByTestId('progress-outbox-item')).toHaveTextContent('พบรหัสกิจกรรมที่ไม่อยู่ในโครงการนี้'),
       )
-      expect(screen.getByText('22222222-2222-2222-2222-222222222222')).toBeInTheDocument() // not cleared
+      expect(screen.getByTestId('progress-outbox-item')).toHaveAttribute('data-outbox-status', 'failed')
     })
   })
 })

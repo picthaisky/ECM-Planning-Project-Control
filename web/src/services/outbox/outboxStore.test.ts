@@ -113,6 +113,37 @@ describe('outboxStore', () => {
     await expect(store.markFailed('missing', 'x')).resolves.toBeUndefined()
   })
 
+  describe('markConflict (S13-FE-01, idempotency 409)', () => {
+    it('sets status conflict, records the Thai message, increments attemptCount, and drops the blob', async () => {
+      const { store } = makeStore()
+      const blob = new Blob(['bytes'], { type: 'image/jpeg' })
+      const item = await store.enqueue({ kind: 'weather-log', payload: {}, blob })
+
+      await store.markConflict(item.id, 'ข้อมูลไม่ตรงกับที่เคยส่งไปก่อนหน้านี้')
+
+      const [reloaded] = await store.list()
+      expect(reloaded.status).toBe('conflict')
+      expect(reloaded.lastError).toBe('ข้อมูลไม่ตรงกับที่เคยส่งไปก่อนหน้านี้')
+      expect(reloaded.attemptCount).toBe(1)
+      expect(reloaded.blob).toBeNull()
+    })
+
+    it('is excluded from pending() — a conflict is terminal, never auto-retried', async () => {
+      const { store } = makeStore()
+      const item = await store.enqueue({ kind: 'weather-log', payload: {} })
+      await store.markConflict(item.id, 'conflict message')
+
+      expect(await store.pending()).toEqual([])
+      // But it still shows up in a plain list() — the UI must be able to render it.
+      expect((await store.list())[0].status).toBe('conflict')
+    })
+
+    it('on an unknown id is a safe no-op (never throws)', async () => {
+      const { store } = makeStore()
+      await expect(store.markConflict('missing', 'x')).resolves.toBeUndefined()
+    })
+  })
+
   it('remove deletes the item entirely', async () => {
     const { store } = makeStore()
     const item = await store.enqueue({ kind: 'photo', payload: {} })

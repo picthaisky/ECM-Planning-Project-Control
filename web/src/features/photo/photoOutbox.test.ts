@@ -1,10 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { uploadPhotoOutboxItem } from './photoOutbox'
-import { uploadPhoto } from './api'
+import { uploadPhoto, PhotoApiError } from './api'
+import { OutboxConflictError } from '../../services/outbox'
 import type { OutboxItem } from '../../services/outbox'
 import type { PhotoOutboxPayload } from './photoOutbox'
 
-vi.mock('./api', () => ({ uploadPhoto: vi.fn() }))
+vi.mock('./api', () => ({
+  uploadPhoto: vi.fn(),
+  PhotoApiError: class PhotoApiError extends Error {
+    status?: number
+    code?: string
+    constructor(message: string, status?: number, code?: string) {
+      super(message)
+      this.name = 'PhotoApiError'
+      this.status = status
+      this.code = code
+    }
+  },
+}))
 
 function makeItem(overrides: Partial<OutboxItem<PhotoOutboxPayload>> = {}): OutboxItem<PhotoOutboxPayload> {
   return {
@@ -58,5 +71,40 @@ describe('uploadPhotoOutboxItem', () => {
 
     await expect(uploadPhotoOutboxItem(item)).rejects.toThrow(/ไม่พบไฟล์รูปภาพ/)
     expect(uploadPhoto).not.toHaveBeenCalled()
+  })
+
+  describe('S13-FE-01: idempotency 409 handling', () => {
+    it('maps a 409 IdempotencyPayloadMismatch to OutboxConflictError, not an ordinary retryable throw', async () => {
+      vi.mocked(uploadPhoto).mockRejectedValueOnce(
+        new PhotoApiError('รายการนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้', 409, 'IdempotencyPayloadMismatch'),
+      )
+
+      const item = makeItem()
+      const error = await uploadPhotoOutboxItem(item).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(OutboxConflictError)
+      expect((error as Error).message).toBe('รายการนี้เคยถูกส่งไปแล้วด้วยข้อมูลที่ต่างจากครั้งนี้')
+    })
+
+    it('leaves a 409 IdempotencyRequestInProgress as an ordinary (retryable) error', async () => {
+      vi.mocked(uploadPhoto).mockRejectedValueOnce(
+        new PhotoApiError('มีการส่งรายการนี้อยู่แล้ว', 409, 'IdempotencyRequestInProgress'),
+      )
+
+      const item = makeItem()
+      const error = await uploadPhotoOutboxItem(item).catch((e: unknown) => e)
+
+      expect(error).not.toBeInstanceOf(OutboxConflictError)
+      expect(error).toBeInstanceOf(PhotoApiError)
+    })
+
+    it('leaves a non-409 failure as an ordinary (retryable) error', async () => {
+      vi.mocked(uploadPhoto).mockRejectedValueOnce(new PhotoApiError('ไม่พบโครงการที่ระบุ', 404, 'PhotoProjectNotFound'))
+
+      const item = makeItem()
+      const error = await uploadPhotoOutboxItem(item).catch((e: unknown) => e)
+
+      expect(error).not.toBeInstanceOf(OutboxConflictError)
+    })
   })
 })

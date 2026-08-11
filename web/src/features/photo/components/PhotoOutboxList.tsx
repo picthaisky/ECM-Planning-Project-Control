@@ -1,26 +1,11 @@
 import { useEffect, useState } from 'react'
-import { StatusPill } from '../../../components'
-import type { StatusPillTone } from '../../../components'
+import { OUTBOX_STATUS_LABELS, OUTBOX_STATUS_TONES, StatusPill } from '../../../components'
 import type { OutboxItem } from '../../../services/outbox'
 import type { PhotoOutboxPayload } from '../photoOutbox'
 
 export interface PhotoOutboxListProps {
   items: OutboxItem<PhotoOutboxPayload>[]
   onRetry: () => void
-}
-
-const STATUS_LABELS: Record<OutboxItem['status'], string> = {
-  queued: 'รอซิงค์',
-  syncing: 'กำลังซิงค์...',
-  synced: 'ซิงค์แล้ว',
-  failed: 'ซิงค์ไม่สำเร็จ',
-}
-
-const STATUS_TONES: Record<OutboxItem['status'], StatusPillTone> = {
-  queued: 'warning',
-  syncing: 'warning',
-  synced: 'success',
-  failed: 'danger',
 }
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('th-TH', {
@@ -91,7 +76,7 @@ export function PhotoOutboxList({ items, onRetry }: PhotoOutboxListProps) {
           <PhotoThumbnail blob={item.blob} />
           <div className="space-y-1 p-2.5">
             <div className="flex items-center justify-between gap-2">
-              <StatusPill label={STATUS_LABELS[item.status]} tone={STATUS_TONES[item.status]} />
+              <StatusPill label={OUTBOX_STATUS_LABELS[item.status]} tone={OUTBOX_STATUS_TONES[item.status]} />
               <span className="text-[10px] text-text-faint">{formatCreatedAt(item.createdAt)}</span>
             </div>
             {item.payload.fields.caption && (
@@ -115,6 +100,16 @@ export function PhotoOutboxList({ items, onRetry }: PhotoOutboxListProps) {
                   ลองซิงค์ใหม่
                 </button>
               </div>
+            )}
+            {/* S13-FE-01: a `conflict` item's payload has already been rejected once by an
+                Idempotency-Key match on the server — offering "ลองซิงค์ใหม่" here would resend the
+                exact same payload into the exact same rejection, so unlike `failed` there is
+                deliberately no retry action; the message says so plainly rather than leaving the user
+                to wonder why this one has no button. */}
+            {item.status === 'conflict' && (
+              <p className="text-[10.5px] text-danger">
+                {item.lastError ?? 'ข้อมูลขัดแย้งกับรายการที่เคยส่งไปแล้ว'} — ระบบจะไม่ลองส่งซ้ำอัตโนมัติ
+              </p>
             )}
           </div>
         </div>

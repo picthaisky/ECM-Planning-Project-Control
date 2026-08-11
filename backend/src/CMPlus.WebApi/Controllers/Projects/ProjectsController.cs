@@ -1,3 +1,4 @@
+using CMPlus.Application.Features.Projects.Commands.SetEacAdvancedInputs;
 using CMPlus.Application.Features.Projects.Commands.SetEacVariantDefault;
 using CMPlus.Application.Features.Projects.Commands.UpdateProject;
 using CMPlus.Application.Features.Projects.Queries.GetProjects;
@@ -93,6 +94,28 @@ public sealed class ProjectsController(ISender sender) : ControllerBase
         Guid projectId, [FromBody] SetEacVariantDefaultRequest request, CancellationToken cancellationToken)
     {
         var result = await sender.Send(new SetEacVariantDefaultCommand(projectId, request.Variant), cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : ResultProblemMapper.ToActionResult(result.Error, HttpContext.Request.Path);
+    }
+
+    /// <summary>
+    /// S14-BE-03 (ADR-0007(d)'s deferred Sprint 14 gap): sets `Project.EacManualEtc`/
+    /// `EacCustomPerformanceFactor` - the two advanced EAC inputs `BottomUpEtc`/`CustomPf` need.
+    /// Same role gate as <see cref="SetEacDefault"/> (PM/QS/Executive - ADR-0007(f)'s three roles;
+    /// these inputs feed directly into that same decision) and audited automatically by
+    /// <c>AuditSaveChangesInterceptor</c> - see <see cref="SetEacAdvancedInputsCommand"/>'s remarks.
+    /// Full-representation PUT: both fields are always supplied (either may be null).
+    /// </summary>
+    [HttpPut("{projectId:guid}/eac-advanced-inputs")]
+    [Authorize(Roles = $"{nameof(UserRole.PM)},{nameof(UserRole.QS)},{nameof(UserRole.Executive)}")]
+    public async Task<IActionResult> SetEacAdvancedInputs(
+        Guid projectId, [FromBody] SetEacAdvancedInputsRequest request, CancellationToken cancellationToken)
+    {
+        var result = await sender.Send(
+            new SetEacAdvancedInputsCommand(projectId, request.EacManualEtc, request.EacCustomPerformanceFactor),
+            cancellationToken);
 
         return result.IsSuccess
             ? Ok(result.Value)

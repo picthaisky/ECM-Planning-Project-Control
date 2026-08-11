@@ -2,6 +2,8 @@ export type { OutboxStorageAdapter } from './storage'
 export { createIndexedDbOutboxStorage } from './storage'
 export { createInMemoryOutboxStorage } from './storage.inMemory'
 
+export { OutboxConflictError, IDEMPOTENCY_CONFLICT_CODES } from './errors'
+
 export { createOutboxStore, OutboxOwnerRequiredError, PENDING_STATUSES } from './outboxStore'
 export type { CreateOutboxStoreOptions, OutboxStore } from './outboxStore'
 

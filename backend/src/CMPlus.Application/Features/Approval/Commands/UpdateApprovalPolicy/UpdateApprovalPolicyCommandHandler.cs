@@ -43,11 +43,20 @@ public sealed partial class UpdateApprovalPolicyCommandHandler(
         // Never edits `current` in place beyond flipping IsActive/EffectiveTo - `nextVersion` is
         // always a brand-new row with its own new Id (approval-workflow.md §5.2 "version-pin, never
         // mutate"). Both persist in the same SaveChanges call (IApprovalPolicyRepository.SaveChangesAsync)
-        // so a reader can never observe two simultaneously-active versions.
+        // so a reader can never observe two simultaneously-active versions in the ordinary case.
         current?.Deactivate(now);
         repository.AddVersion(nextVersion);
 
-        await repository.SaveChangesAsync(cancellationToken);
+        // See IApprovalPolicyRepository.SaveChangesAsync's remarks: false here means a genuine
+        // concurrent-request race on one of the two ADR-0021 filtered unique indexes - this
+        // handler always writes ProjectId = null, so in practice it is always the
+        // (TenantId, DocumentType) WHERE IsActive = 1 AND ProjectId IS NULL index - (or, in
+        // principle, an optimistic-concurrency mismatch) - a clean, reportable failure, never an
+        // escaped DbUpdateException.
+        if (!await repository.SaveChangesAsync(cancellationToken))
+        {
+            return Result<ApprovalPolicyDto>.Failure(ApprovalPolicyErrorCodes.ConcurrencyConflict);
+        }
 
         return Result<ApprovalPolicyDto>.Success(ToDto(nextVersion));
     }

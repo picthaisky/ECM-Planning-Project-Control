@@ -14,13 +14,18 @@ export { useNodeActivities } from './useNodeActivities'
 export type { NodeActivitiesState } from './useNodeActivities'
 export { useBatchProgressForm } from './useBatchProgressForm'
 export type { ProgressRow, BatchSubmitState } from './useBatchProgressForm'
+export { useProgressBatchOutbox } from './useProgressBatchOutbox'
+export type { UseProgressBatchOutboxResult } from './useProgressBatchOutbox'
+export { PROGRESS_BATCH_OUTBOX_KIND, uploadProgressBatchOutboxItem } from './progressOutbox'
+export type { ProgressBatchOutboxPayload } from './progressOutbox'
 export { useRecalculateCpm } from './useRecalculateCpm'
 export type { RecalculateCpmState } from './useRecalculateCpm'
 
 export { flattenWbsTree, collectLeafNodes, searchWbsTree } from './flattenTree'
 export type { FlatWbsRow } from './flattenTree'
 
-export { getWbsTree, getNodeActivities, batchRecordProgress, recalculateCpm, WbsApiError } from './api'
+export { getWbsTree, getWbsTreeWithCacheInfo, getNodeActivities, batchRecordProgress, recalculateCpm, WbsApiError } from './api'
+export type { WbsTreeFetchResult } from './api'
 
 export type {
   WbsTreeNodeDto,

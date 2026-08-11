@@ -16,6 +16,7 @@ dist-ssr
 # e2e/visual/**/*.png (checked-in visual baselines) are source-controlled.
 /test-results/
 /playwright-report/
+/playwright-report-sw/
 /blob-report/
 /playwright/.cache/
 

@@ -8,14 +8,23 @@ import type {
 } from './types'
 
 /**
- * ADR-0007(d): the engine computes all five EAC variants; the Sprint 7 UI surfaces only these
- * three (index-based) variants, in this fixed display order. `BottomUpEtc`/`CustomPf` are
- * deliberately excluded — their input UI (a persisted manual ETC / custom performance factor) lands
- * in Sprint 14. Every component that renders a *choosable* variant list must build it from this
- * constant rather than iterating `EvmResponseDto.variants` directly, so "only 3 in v1" lives in one
- * place, not re-decided ad hoc at each call site.
+ * ADR-0007(d): the engine computes all five EAC variants. Sprint 7's UI (v1) surfaced only the
+ * three index-based variants; **Sprint 14 (S14-FE-02) opens the remaining two**, `BottomUpEtc`/
+ * `CustomPf` — their input UI (`EacAdvancedInputsCard`, `web/src/features/info/`) now exists, so
+ * this constant grows from 3 to 5. Every component that renders a *choosable* variant list must
+ * build it from this constant rather than iterating `EvmResponseDto.variants` directly, so the
+ * display order/membership lives in one place, not re-decided ad hoc at each call site.
+ * `BottomUpEtc`/`CustomPf` are listed last (index-based variants first, matching evm-formulas.md's
+ * own table order) — `EacVariantSelect` is responsible for disabling either one until its own
+ * project-level input is actually configured (S14-FE-02 DoD).
  */
-export const UI_EAC_VARIANTS: readonly EacVariant[] = ['CpiBased', 'Atypical', 'CpiSpiBased']
+export const UI_EAC_VARIANTS: readonly EacVariant[] = [
+  'CpiBased',
+  'Atypical',
+  'CpiSpiBased',
+  'BottomUpEtc',
+  'CustomPf',
+]
 
 /** Short tile/option label per variant (technical terms kept in English per CLAUDE.md). */
 export const VARIANT_SHORT_LABELS: Record<EacVariant, string> = {
@@ -31,8 +40,8 @@ export const VARIANT_ASSUMPTION_LABELS: Record<EacVariant, string> = {
   CpiBased: 'อัตราต้นทุนปัจจุบันเป็นปกติและจะดำเนินต่อไปในลักษณะเดิม',
   Atypical: 'ผลต่างที่ผ่านมาเป็นเหตุการณ์ครั้งเดียว มีสาเหตุชัดเจน ไม่เกิดซ้ำ',
   CpiSpiBased: 'ความล่าช้าของตารางเวลาเองก็เป็นตัวขับต้นทุนงานที่เหลือ (เร่งงาน/OT)',
-  BottomUpEtc: 'มีการประมาณการงานที่เหลือใหม่ (พร้อมใช้งาน Sprint 14)',
-  CustomPf: 'กำหนดตัวคูณผลการดำเนินงานเอง (พร้อมใช้งาน Sprint 14)',
+  BottomUpEtc: 'มีการประมาณการงานที่เหลือใหม่ (revised BoQ / QS re-measure)',
+  CustomPf: 'กำหนดตัวคูณผลการดำเนินงานเอง (เช่น ตามเงื่อนไขที่ lender กำหนด)',
 }
 
 /** Formula caption per variant, shown under the EAC tile so the currently-selected assumption is
@@ -54,8 +63,45 @@ export const EAC_NULL_REASON_LABELS: Record<EacNullReason, string> = {
   NoActualCost: 'ยังไม่มีข้อมูลค่าใช้จ่ายจริง (Actual Cost) ของโครงการนี้',
   NoPlannedValue: 'โครงการนี้ยังไม่มีเส้นฐาน (Baseline) จึงไม่มีมูลค่าตามแผน (PV)',
   ZeroCpi: 'มีค่าใช้จ่ายจริงเกิดขึ้นแล้วแต่ยังไม่มีผลงานที่ทำได้ (EV) จึงคำนวณ CPI ไม่ได้',
-  ManualEtcNotSet: 'ยังไม่ได้กรอกประมาณการงานที่เหลือ (Bottom-Up ETC) — พร้อมใช้งานใน Sprint 14',
-  CustomPfNotSet: 'ยังไม่ได้กำหนดตัวคูณผลการดำเนินงานเอง (Custom Performance Factor) — พร้อมใช้งานใน Sprint 14',
+  ManualEtcNotSet: 'ยังไม่ได้กรอกประมาณการงานที่เหลือ (Bottom-Up ETC) — กรอกได้ที่หน้าข้อมูลโครงการ (Project Info)',
+  CustomPfNotSet: 'ยังไม่ได้กำหนดตัวคูณผลการดำเนินงานเอง (Custom Performance Factor) — กำหนดได้ที่หน้าข้อมูลโครงการ (Project Info)',
+}
+
+/**
+ * S14-FE-02 DoD: "`BottomUpEtc`/`CustomPf` are selectable only when their input exists; when
+ * absent, the option is disabled with an explanation of where to set it." The two reasons below
+ * are the only ones `EacCalculator` can return for these two variants outside two edge rules that
+ * apply uniformly to *every* variant regardless of input state (`NotStarted`, and the `BAC-EV=0`
+ * short-circuit, which returns `computable: true` unconditionally — see `EacCalculator.ComputeAll`'s
+ * own remarks) — so a `reason` of exactly one of these two is the unambiguous "the input was never
+ * configured" signal `EacVariantSelect` disables on. A `computable: true` result is always safe to
+ * enable (the input necessarily exists in the only regime where these two ever fail to reach that
+ * short-circuit); the reverse (a stale "false" reading while typed input truly exists) cannot
+ * happen for these two variants outside `NotStarted`, which itself already renders "—" everywhere
+ * else in this UI and is rare enough in practice that a temporarily-enabled-but-unselectable option
+ * is an acceptable, honestly-labelled edge case rather than one worth a second network round trip
+ * to resolve definitively.
+ */
+export const MISSING_EAC_INPUT_REASON: Partial<Record<EacVariant, EacNullReason>> = {
+  BottomUpEtc: 'ManualEtcNotSet',
+  CustomPf: 'CustomPfNotSet',
+}
+
+/** `EvmWarningCodes` (backend), translated. `EvmResponseDto.warnings` carries the bare code
+ * strings — this was previously rendered verbatim in English (`EvmPage.tsx` used to
+ * `evm.warnings.join(' · ')` with no translation at all); every known code gets a Thai message
+ * here, and an unrecognised one still degrades to the raw code rather than disappearing silently
+ * (never a blank warning banner for a code this table has not caught up with yet). */
+export const EVM_WARNING_LABELS: Record<string, string> = {
+  EarnedValueExceedsBudget:
+    'มูลค่างานที่ทำได้จริง (EV) มากกว่างบประมาณ (BAC) — ตรวจสอบเปอร์เซ็นต์ความคืบหน้า/น้ำหนักงานอีกครั้ง',
+  ActualCostIsNegative:
+    'ค่าใช้จ่ายจริง (AC) ติดลบ (มีการกลับรายการ/เครดิตโน้ตมากกว่ายอดที่บันทึกไว้) — ตัวเลขที่อิง CPI ในหน้านี้ควรใช้ด้วยความระมัดระวัง',
+  // domain-rules.md §5.7 / EvmWarningCodes.ManualEtcPredatesBacChange's own remarks: re-entering
+  // `EacManualEtc` (the S14-FE-02 input, `web/src/features/info/EacAdvancedInputsCard.tsx`) is
+  // exactly the fix — `EvmPage.tsx` links straight there when this code is present.
+  ManualEtcPredatesBacChange:
+    'มี Variation Order ที่อนุมัติแล้วเปลี่ยนงบประมาณ (BAC) หลังจากกรอกค่าประมาณการ Bottom-Up ETC ครั้งล่าสุด — ตัวเลข EAC ของ Bottom-Up ETC อาจไม่ทันปัจจุบันแล้ว',
 }
 
 /**

@@ -174,6 +174,26 @@ public sealed class CmPlusDbContext : DbContext
     /// row. Ordinary mutable aggregate, unlike its sibling above.</summary>
     public DbSet<ManpowerPlan> ManpowerPlans => Set<ManpowerPlan>();
 
+    /// <summary>S13-BE-01/S13-DB-01 (ADR-0005 US-13.1, closes security review sprint-12.md M-01):
+    /// server-side <c>Idempotency-Key</c> dedupe record for a site-module write endpoint. Ordinary
+    /// mutable aggregate (NOT <see cref="Domain.Common.IAppendOnly"/>) - see
+    /// <see cref="Domain.Entities.IdempotencyKey"/>'s own remarks for why.</summary>
+    public DbSet<IdempotencyKey> IdempotencyKeys => Set<IdempotencyKey>();
+
+    /// <summary>S14-BE-01 (US-14.1): a saved schedule/budget reference point. Ordinary mutable
+    /// aggregate at the parent level (<see cref="Domain.Entities.Baseline.IsActive"/> must stay
+    /// editable for the project's whole life) - see that entity's own remarks for why it is
+    /// deliberately NOT <see cref="Domain.Common.IAppendOnly"/> even though its children are.
+    /// </summary>
+    public DbSet<Baseline> Baselines => Set<Baseline>();
+
+    /// <summary>The frozen per-activity snapshot rows owned by each <see cref="Baseline"/> -
+    /// "Baseline snapshots are historical evidence" (S14-BE-01 brief). Structurally enforced via
+    /// <see cref="Domain.Common.IAppendOnly"/> (security review sprint-09.md M-01 pattern) - see
+    /// <see cref="Configurations.BaselineActivitySnapshotConfiguration"/> and the entity's own
+    /// remarks.</summary>
+    public DbSet<BaselineActivitySnapshot> BaselineActivitySnapshots => Set<BaselineActivitySnapshot>();
+
     /// <summary>
     /// Narrow, explicitly grep-able escape hatch for the S3-BE-04 bulk-import path (ADR-0002-style
     /// discipline: any bypass of a default cross-cutting behaviour must be visible, not casual).

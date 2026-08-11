@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios'
-import type { InternalAxiosRequestConfig } from 'axios'
+import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { useAuthStore } from '../store/authStore'
 import { pushToast } from '../store/toastStore'
 
@@ -72,3 +72,13 @@ export const apiClient = axios.create({ baseURL: API_BASE_URL })
 
 apiClient.interceptors.request.use(attachAuthHeader)
 apiClient.interceptors.response.use((response) => response, handleResponseError)
+
+/** S13-FE-02: `web/src/sw.ts`'s runtime-cache fallback (`networkFirstApi`) sets this header on any
+ * GET response it serves from its own cache instead of the network — the one signal that lets a
+ * caller distinguish "real, live data" from "the last-known copy, shown because the request could
+ * not reach the network." Header names are lower-cased by Axios's own response-header normalization,
+ * so the check here matches on the lower-case form regardless of the exact casing the service worker
+ * used when setting it. */
+export function isServedFromOfflineCache(response: AxiosResponse): boolean {
+  return response.headers?.['x-cm-served-from'] === 'sw-cache'
+}

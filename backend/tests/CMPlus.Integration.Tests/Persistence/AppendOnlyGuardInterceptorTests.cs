@@ -866,4 +866,172 @@ public class AppendOnlyGuardInterceptorTests
 
         Assert.Equal(1, await context.CpmRuns.CountAsync());
     }
+
+    // ---- S14-BE-01: Baseline/BaselineActivitySnapshot immutability ("Baseline snapshots are
+    // historical evidence" - this task's brief; mirrors the CpmRun/CpmRunActivity M-01 pattern
+    // exactly, for the child row only - Baseline itself is deliberately NOT IAppendOnly, since
+    // IsActive must stay mutable for the project's whole life, so this section also confirms that
+    // legitimate mutation still works under the guard) ----
+
+    private static async Task<(Guid TenantId, Guid BaselineId, Guid SnapshotRowId, string DatabaseName)>
+        SeedOneBaselineWithASnapshotAsync(bool withGuard)
+    {
+        var tenantId = Guid.NewGuid();
+        var tenantProvider = new FakeTenantProvider(tenantId);
+        var databaseName = Guid.NewGuid().ToString();
+        var activityId = Guid.NewGuid();
+
+        using var context = CreateContext(databaseName, tenantProvider, withGuard);
+        var baseline = Domain.Entities.Baseline.Capture(
+            tenantId, Guid.NewGuid(), "Revised Baseline - Rev.2", Now, Guid.NewGuid(), 492_400_000.00m,
+            [new BaselineActivitySnapshotInput(activityId, Now, Now.AddDays(10), 10, 1_000_000.00m)]);
+        context.Baselines.Add(baseline);
+        await context.SaveChangesAsync();
+
+        return (tenantId, baseline.Id, baseline.Snapshots.Single().Id, databaseName);
+    }
+
+    /// <summary>Reproduces the M-01 shape exactly (review probe 7, reproduced for this new child
+    /// row): a <see cref="BaselineActivitySnapshot"/> row can be rewritten and deleted through an
+    /// ordinary <see cref="CmPlusDbContext"/> with no guard interceptor wired in - the baseline
+    /// S14-BE-01's use of <see cref="IAppendOnly"/> closes. Kept as a permanent regression test for
+    /// the same reason its <see cref="CpmRunActivity"/>/<see cref="DailyWeatherLog"/> siblings above
+    /// are.</summary>
+    [Fact]
+    public async Task Without_The_Guard_A_BaselineActivitySnapshots_BudgetCost_Can_Still_Be_Rewritten_And_Deleted_Through_An_Ordinary_DbContext()
+    {
+        var (tenantId, _, snapshotRowId, databaseName) = await SeedOneBaselineWithASnapshotAsync(withGuard: false);
+        var tenantProvider = new FakeTenantProvider(tenantId);
+
+        using (var tamperContext = CreateContext(databaseName, tenantProvider, withGuard: false))
+        {
+            var snapshot = await tamperContext.Set<BaselineActivitySnapshot>().SingleAsync(s => s.Id == snapshotRowId);
+            tamperContext.Entry(snapshot).Property(nameof(BaselineActivitySnapshot.BudgetCost)).CurrentValue = 999_999_999.00m;
+            await tamperContext.SaveChangesAsync(); // succeeds today - the bug this fix closes.
+        }
+
+        using (var verifyContext = CreateContext(databaseName, tenantProvider, withGuard: false))
+        {
+            var tampered = await verifyContext.Set<BaselineActivitySnapshot>().AsNoTracking().SingleAsync(s => s.Id == snapshotRowId);
+            Assert.Equal(999_999_999.00m, tampered.BudgetCost);
+        }
+
+        using (var deleteContext = CreateContext(databaseName, tenantProvider, withGuard: false))
+        {
+            var snapshot = await deleteContext.Set<BaselineActivitySnapshot>().SingleAsync(s => s.Id == snapshotRowId);
+            deleteContext.Remove(snapshot);
+            await deleteContext.SaveChangesAsync(); // succeeds today - the bug this fix closes.
+        }
+
+        using (var verifyContext = CreateContext(databaseName, tenantProvider, withGuard: false))
+        {
+            Assert.Equal(0, await verifyContext.Set<BaselineActivitySnapshot>().CountAsync());
+        }
+    }
+
+    [Theory]
+    [InlineData(nameof(BaselineActivitySnapshot.BudgetCost))]
+    [InlineData(nameof(BaselineActivitySnapshot.DurationDays))]
+    [InlineData(nameof(BaselineActivitySnapshot.PlannedStart))]
+    public async Task With_The_Guard_A_BaselineActivitySnapshots_Field_Cannot_Be_Rewritten_Through_An_Ordinary_DbContext(string propertyName)
+    {
+        var (tenantId, _, snapshotRowId, databaseName) = await SeedOneBaselineWithASnapshotAsync(withGuard: true);
+        var tenantProvider = new FakeTenantProvider(tenantId);
+
+        using var tamperContext = CreateContext(databaseName, tenantProvider, withGuard: true);
+        var snapshot = await tamperContext.Set<BaselineActivitySnapshot>().SingleAsync(s => s.Id == snapshotRowId);
+
+        object tamperedValue = propertyName switch
+        {
+            nameof(BaselineActivitySnapshot.BudgetCost) => 999_999_999.00m,
+            nameof(BaselineActivitySnapshot.DurationDays) => 999,
+            nameof(BaselineActivitySnapshot.PlannedStart) => Now.AddYears(1),
+            _ => throw new InvalidOperationException($"Unhandled property {propertyName}"),
+        };
+        tamperContext.Entry(snapshot).Property(propertyName).CurrentValue = tamperedValue;
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => tamperContext.SaveChangesAsync());
+        Assert.Contains(nameof(BaselineActivitySnapshot), ex.Message);
+        Assert.Contains("append-only", ex.Message);
+    }
+
+    [Fact]
+    public async Task With_The_Guard_Deleting_A_BaselineActivitySnapshot_Throws_And_The_Row_Survives()
+    {
+        var (tenantId, _, snapshotRowId, databaseName) = await SeedOneBaselineWithASnapshotAsync(withGuard: true);
+        var tenantProvider = new FakeTenantProvider(tenantId);
+
+        using (var deleteContext = CreateContext(databaseName, tenantProvider, withGuard: true))
+        {
+            var snapshot = await deleteContext.Set<BaselineActivitySnapshot>().SingleAsync(s => s.Id == snapshotRowId);
+            deleteContext.Remove(snapshot);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => deleteContext.SaveChangesAsync());
+        }
+
+        using var verifyContext = CreateContext(databaseName, tenantProvider, withGuard: true);
+        Assert.Equal(1, await verifyContext.Set<BaselineActivitySnapshot>().CountAsync());
+    }
+
+    [Fact]
+    public async Task With_The_Guard_Adding_A_New_Baseline_Still_Succeeds_Append_Is_Still_Allowed()
+    {
+        var tenantId = Guid.NewGuid();
+        var tenantProvider = new FakeTenantProvider(tenantId);
+        var databaseName = Guid.NewGuid().ToString();
+
+        using var context = CreateContext(databaseName, tenantProvider, withGuard: true);
+        var baseline = Domain.Entities.Baseline.Capture(
+            tenantId, Guid.NewGuid(), "BL-0", Now, Guid.NewGuid(), 485_000_000.00m, []);
+        context.Baselines.Add(baseline);
+
+        await context.SaveChangesAsync(); // must not throw - Added is not Modified/Deleted.
+
+        Assert.Equal(1, await context.Baselines.CountAsync());
+    }
+
+    /// <summary>
+    /// The other, equally important half for the <em>parent</em> row specifically: unlike
+    /// <see cref="BaselineActivitySnapshot"/>, <see cref="Domain.Entities.Baseline"/> is deliberately
+    /// NOT <see cref="IAppendOnly"/> (its own remarks explain why - <c>IsActive</c> must stay
+    /// mutable for the project's whole life). This confirms the guard - wired for the same
+    /// <see cref="CmPlusDbContext"/> - does not accidentally block that legitimate mutation, the
+    /// same "must not break the happy path" proof every other guarded aggregate in this file
+    /// carries (e.g. <c>RecordPayment</c> on a <c>Certified</c> <c>PaymentCertificate</c> above).
+    /// </summary>
+    [Fact]
+    public async Task With_The_Guard_A_Baselines_IsActive_Can_Still_Be_Legitimately_Toggled()
+    {
+        var (tenantId, baselineId, _, databaseName) = await SeedOneBaselineWithASnapshotAsync(withGuard: true);
+        var tenantProvider = new FakeTenantProvider(tenantId);
+
+        using (var activateContext = CreateContext(databaseName, tenantProvider, withGuard: true))
+        {
+            var baseline = await activateContext.Baselines.SingleAsync(b => b.Id == baselineId);
+            baseline.Activate();
+
+            await activateContext.SaveChangesAsync(); // must NOT throw - Baseline is not IAppendOnly.
+        }
+
+        var afterActivate = await LoadBaselineUntrackedAsync(databaseName, tenantProvider, baselineId);
+        Assert.True(afterActivate.IsActive);
+
+        using (var deactivateContext = CreateContext(databaseName, tenantProvider, withGuard: true))
+        {
+            var baseline = await deactivateContext.Baselines.SingleAsync(b => b.Id == baselineId);
+            baseline.Deactivate();
+
+            await deactivateContext.SaveChangesAsync(); // must NOT throw either.
+        }
+
+        var afterDeactivate = await LoadBaselineUntrackedAsync(databaseName, tenantProvider, baselineId);
+        Assert.False(afterDeactivate.IsActive);
+    }
+
+    private static async Task<Domain.Entities.Baseline> LoadBaselineUntrackedAsync(
+        string databaseName, FakeTenantProvider tenantProvider, Guid baselineId)
+    {
+        using var context = CreateContext(databaseName, tenantProvider, withGuard: true);
+        return await context.Baselines.AsNoTracking().SingleAsync(b => b.Id == baselineId);
+    }
 }

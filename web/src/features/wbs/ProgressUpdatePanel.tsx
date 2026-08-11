@@ -1,7 +1,7 @@
 import { useId, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { observeElementRect, useVirtualizer } from '@tanstack/react-virtual'
-import { Button } from '../../components'
+import { Button, OUTBOX_STATUS_LABELS, OUTBOX_STATUS_TONES, StatusPill } from '../../components'
 import { formatPercent } from '../../utils/format'
 import { DecreaseConfirmModal } from './DecreaseConfirmModal'
 import type { useBatchProgressForm } from './useBatchProgressForm'
@@ -221,9 +221,12 @@ export function ProgressUpdatePanel({ form, nodeActivitiesLoading, nodeActivitie
           {form.submitError}
         </p>
       )}
+      {/* S13-FE-01 (ADR-0005): submission always enqueues first — `form.lastResultCount` is now "rows
+          queued this submit", not a server confirmation, so this reads "คิวไว้แล้ว" rather than
+          "สำเร็จ"; the queue list below shows each batch's *real* sync outcome. */}
       {form.lastResultCount !== null && form.submitState === 'idle' && form.rows.length === 0 && (
         <p role="status" className="mt-3 text-xs text-success">
-          บันทึกความคืบหน้าสำเร็จ {form.lastResultCount.toLocaleString('th-TH')} รายการ
+          คิวไว้แล้ว {form.lastResultCount.toLocaleString('th-TH')} รายการ (รอซิงค์)
         </p>
       )}
 
@@ -244,6 +247,61 @@ export function ProgressUpdatePanel({ form, nodeActivitiesLoading, nodeActivitie
         onConfirm={() => void form.confirmDecreaseAndSubmit()}
         confirming={form.submitState === 'submitting'}
       />
+
+      <ProgressOutboxQueue form={form} />
+    </div>
+  )
+}
+
+/**
+ * S13-FE-01's "เข้าคิวพร้อมสถานะรายรายการ" DoD for batch progress — this device's own not-yet-synced
+ * batch queue for this project, mirroring `features/photo/components/PhotoOutboxList.tsx`'s status-
+ * pill discipline. Each item is one whole batch submit (`useProgressBatchOutbox.ts`'s one-enqueue-
+ * per-submit shape), so the row count shown is entries-per-batch, not per-activity.
+ *
+ * The header (title + "ซิงค์เดี๋ยวนี้") always renders, regardless of `pending.length` — mirroring
+ * `WeatherPage.tsx`'s identical layout choice, and deliberately *not* the shape this component had
+ * before: the whole block used to return `null` once nothing was pending, which meant the button
+ * itself unmounted the instant the last item finished syncing — a real, observed failure mode (a
+ * click landing at exactly that moment loses its target mid-action), not merely a cosmetic one.
+ */
+function ProgressOutboxQueue({ form }: { form: ReturnType<typeof useBatchProgressForm> }) {
+  const pending = form.outboxItems.filter((item) => item.status !== 'synced')
+
+  return (
+    <div className="mt-4 border-t border-border-subtle pt-3">
+      <div className="flex items-center justify-between">
+        <div className="font-heading text-[12px] font-semibold text-navy">คิวออฟไลน์ของอุปกรณ์นี้ (โครงการนี้)</div>
+        <Button size="sm" variant="secondary" onClick={() => void form.syncNow()}>
+          ซิงค์เดี๋ยวนี้
+        </Button>
+      </div>
+      {form.syncCapability === 'fallback-only' && (
+        <p className="mt-1 text-[10.5px] text-text-faint">
+          อุปกรณ์นี้ไม่รองรับการซิงค์อัตโนมัติเบื้องหลัง (เช่น iOS/Safari) — ระบบจะซิงค์ให้ทันทีเมื่อเชื่อมต่ออินเทอร์เน็ตขณะเปิดหน้านี้ค้างไว้
+          หรือกดปุ่ม &quot;ซิงค์เดี๋ยวนี้&quot;
+        </p>
+      )}
+      {pending.length === 0 ? (
+        <p className="mt-2 text-[10.5px] text-text-faint">ไม่มีรายการค้างซิงค์ในเครื่องนี้สำหรับโครงการนี้</p>
+      ) : (
+        <div className="mt-2 space-y-2">
+          {pending.map((item) => (
+            <div
+              key={item.id}
+              data-testid="progress-outbox-item"
+              data-outbox-status={item.status}
+              className="flex flex-wrap items-center gap-2 rounded-card border border-border bg-surface px-3 py-2"
+            >
+              <StatusPill label={OUTBOX_STATUS_LABELS[item.status]} tone={OUTBOX_STATUS_TONES[item.status]} />
+              <span className="text-[11px] text-text-faint">{item.payload.request.entries.length} รายการ</span>
+              {(item.status === 'failed' || item.status === 'conflict') && item.lastError && (
+                <span className="w-full text-[10.5px] text-danger sm:w-auto sm:flex-1">{item.lastError}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

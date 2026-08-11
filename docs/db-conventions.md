@@ -186,7 +186,7 @@ after `ActivityProgressLog` already has hundreds of thousands of rows.
 | `WBSNode` | `(TenantId, ProjectId, ParentWbsNodeId)` | hierarchy reads, WBS tree < 100 ms budget |
 | `ActivityRelation` | index on `(TenantId, PredecessorActivityId)` and `(TenantId, SuccessorActivityId)` | CPM forward/backward pass over 10,000+ activities / 15,000+ relations must not scan |
 | `EvmPeriodSnapshot` | unique `(TenantId, ProjectId, DataDate)` | one snapshot per project per data date |
-| `ApprovalPolicy` | unique **filtered** `(TenantId, ProjectId, DocumentType) WHERE IsActive = 1` | two active policies for one scope is a data-integrity bug, not a runtime tie-break |
+| `ApprovalPolicy` | two unique **filtered** indexes, split on `ProjectId` nullability: `(TenantId, DocumentType) WHERE IsActive = 1 AND ProjectId IS NULL`, `(TenantId, ProjectId, DocumentType) WHERE IsActive = 1 AND ProjectId IS NOT NULL` | two active policies for one scope is a data-integrity bug, not a runtime tie-break. **ADR-0021 (2026-08-11):** a single index keyed `(TenantId, ProjectId, DocumentType) WHERE IsActive = 1` gives zero protection for the `ProjectId IS NULL` group under ANSI NULL≠NULL uniqueness semantics — and every policy the shipped write path creates has `ProjectId = null` (tenant-wide default). Split into two indexes over disjoint non-null-key groups so uniqueness always bites; this is the general rule, not specific to this table — **any future filtered unique index whose key includes a nullable column must be split the same way**, never shipped as a single index over a nullable discriminator. |
 | `ApprovalAction` | `(TenantId, DocumentType, DocumentId, RevisionNo, StepNo)` | approval history lookups |
 | `ProjectFinanceLedger` | `(TenantId, ProjectId, Category)` | `SUM()` of retention/advance must seek |
 | `VariationOrder` | `(TenantId, ProjectId, Status)` | cumulative approved-VO sum runs on every VO submit |
@@ -366,3 +366,52 @@ Maintained by `database-engineer`. Changes to an already-accepted rule here need
 the append-only `DENY` grants, `security-auditor` review. Superseding an ADR referenced here
 (ADR-0002, ADR-0007, ADR-0008, ADR-0009, ADR-0010) requires a new ADR — never a silent edit to
 this file.
+
+---
+
+## 10. `IdempotencyKey` retention (S13-BE-01/S13-DB-01, ADR-0005 US-13.1)
+
+Appended additively (new section, no renumbering — §8's "docs/db-conventions.md §8" bulk-operation
+cross-references already appear verbatim in shipped code comments) rather than folded into §7:
+`IdempotencyKey` is deliberately **not** append-only (it transitions `InProgress` →
+`Completed` exactly once, and a reservation that never completes is deleted outright by
+`EfIdempotencyStore.ReleaseAsync`), so it does not belong in §7's list.
+
+**Table:** unique `(TenantId, Key)` (§2 rule 2 compliant — `TenantId` leads); two further
+`(TenantId, Status, CompletedAt)` / `(TenantId, Status, ReservedAt)` composite indexes back the
+retention sweep below (`IdempotencyKeyConfiguration`).
+
+**Retention policy (the DoD's "นโยบายเก็บรักษาที่บันทึกไว้"):**
+
+| Row state | Kept for | Then |
+| --- | --- | --- |
+| `Completed` | 90 days from `CompletedAt` | Deleted by `IdempotencyKeyCleanupService` |
+| `InProgress` (abandoned — the owning process crashed or never released/completed it) | 1 day from `ReservedAt` | Deleted |
+
+Both windows are configuration (`Idempotency:CompletedRetention` / `Idempotency:InProgressRetention`,
+`IdempotencyOptions`), defaulting to the values above; the sweep itself runs hourly
+(`Idempotency:CleanupInterval`).
+
+**Why 90 days, not shorter.** The offline outbox (ADR-0005) places no outer bound on how long a
+device will keep retrying a queued item — `web/src/services/outbox/outboxMaintenance.ts` only prunes
+already-*synced* records (after 7 days); `queued`/`failed` records are retried indefinitely, and that
+file's own test fixtures deliberately keep 90-day-old `failed`/`queued` items as the "still there,
+still retryable" baseline. A device that reconnects within 90 days therefore replays cleanly against
+a live `IdempotencyKey` row. A device that stays offline longer than that and then flushes a stale
+queue re-opens the duplicate window this feature exists to close — a real, irreducible residual risk
+given the client places no outer bound either, disclosed here rather than silently assumed away; 90
+days matches the exact worst case the client's own tests already treat as ordinary, not zero risk.
+
+**Cross-tenant sweep.** `EfIdempotencyStore.PurgeExpiredAsync` is the one legitimate
+`IgnoreQueryFilters()` call in this feature's production code (§2 rule 3) — a background maintenance
+job has no ambient per-request tenant to scope to, and its entire purpose is reclaiming expired rows
+across every tenant in one pass. Grep-able and reviewed the same way as the `Tenant` DbSet's own
+identical exemption (§2 rule 5).
+
+**Implementation note (deviates from §8's general bulk-operation guidance, deliberately).** The
+sweep uses tracked `RemoveRange`/`SaveChangesAsync`, not `ExecuteDeleteAsync` — EF Core's InMemory
+provider (the only database this environment can prove anything against; Docker cannot start here)
+does not support `ExecuteDeleteAsync` at all. §8's guidance targets high-volume, perf-sensitive,
+user-facing bulk paths (CPM write-back over 10,000+ rows); this is a low-frequency background job
+over a table the retention policy itself keeps bounded, so the tracked-entity cost is immaterial and
+InMemory-testability was judged worth more here.

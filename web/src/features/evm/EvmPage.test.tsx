@@ -106,7 +106,8 @@ describe('EvmPage (S7-FE-01..04 integration)', () => {
 
     await waitFor(() => expect(screen.getByTestId('evm-metrics-grid')).toBeInTheDocument())
     expect(screen.getByTestId('evm-metrics-grid').children).toHaveLength(12)
-    expect(screen.getAllByRole('radio')).toHaveLength(3)
+    // S14-FE-02: the selector now shows all 5 engine variants, not only the 3 index-based ones.
+    expect(screen.getAllByRole('radio')).toHaveLength(5)
     expect(screen.getByRole('img')).toBeInTheDocument() // SCurveChart's svg
   })
 
@@ -225,5 +226,84 @@ describe('EvmPage (S7-FE-01..04 integration)', () => {
     // once in `SCurveChart`'s own caption explaining why no forecast line is drawn — both read the
     // same backend-provided `reason` code, never a frontend-guessed explanation.
     expect(screen.getAllByText(/ยังไม่มีข้อมูลค่าใช้จ่ายจริง/)).toHaveLength(2)
+  })
+
+  it('S14-FE-02 DoD: once BottomUpEtc/CustomPf are configured, selecting them shows fixtures A4/A5 exactly, with no extra round trip', async () => {
+    // evm-formulas.md — worked examples A4 (BottomUpEtc, ETC_manual=760,000.00 -> EAC 1,110,000.00)
+    // and A5 (CustomPf, PF_c=1.20 -> EAC 1,190,000.00), same Fixture A core inputs as `fixtureA`.
+    const bothConfigured: EvmResponseDto = {
+      ...fixtureA,
+      variants: [
+        ...fixtureA.variants.filter((v) => v.variant !== 'BottomUpEtc' && v.variant !== 'CustomPf'),
+        variant({
+          variant: 'BottomUpEtc',
+          etc: '760000.00',
+          eac: '1110000.00',
+          vac: '-110000.00',
+          computable: true,
+        }),
+        variant({
+          variant: 'CustomPf',
+          performanceFactor: '1.200000',
+          etc: '840000.00',
+          eac: '1190000.00',
+          vac: '-190000.00',
+          computable: true,
+        }),
+      ],
+    }
+    vi.mocked(api.getEvm).mockResolvedValueOnce(bothConfigured)
+    vi.mocked(api.listEvmSnapshots).mockResolvedValueOnce([])
+    const user = userEvent.setup()
+
+    renderPage('PM')
+    await waitFor(() => expect(screen.getByTestId('evm-metrics-grid')).toBeInTheDocument())
+
+    // Neither option is disabled now that the inputs exist.
+    expect(screen.getByRole('radio', { name: /Bottom-Up ETC/ })).not.toBeDisabled()
+    expect(screen.getByRole('radio', { name: /Custom PF/ })).not.toBeDisabled()
+
+    await user.click(screen.getByRole('radio', { name: /Bottom-Up ETC/ }))
+    expect(screen.getByText('1,110,000.00 บาท')).toBeInTheDocument() // A4 EAC
+    expect(screen.getByText('760,000.00 บาท')).toBeInTheDocument() // A4 ETC
+
+    await user.click(screen.getByRole('radio', { name: /Custom PF/ }))
+    expect(screen.getByText('1,190,000.00 บาท')).toBeInTheDocument() // A5 EAC
+    expect(screen.getByText('840,000.00 บาท')).toBeInTheDocument() // A5 ETC
+
+    expect(api.getEvm).toHaveBeenCalledTimes(1) // still zero extra round trips
+  })
+
+  it('S14-FE-02 DoD: BottomUpEtc/CustomPf are disabled with a Thai explanation, linking to Project Info, when their input is unset', async () => {
+    vi.mocked(api.getEvm).mockResolvedValueOnce(fixtureA) // fixtureA's BottomUpEtc/CustomPf are unset
+    vi.mocked(api.listEvmSnapshots).mockResolvedValueOnce([])
+
+    renderPage('PM')
+    await waitFor(() => expect(screen.getByTestId('evm-metrics-grid')).toBeInTheDocument())
+
+    expect(screen.getByRole('radio', { name: /Bottom-Up ETC/ })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: /Custom PF/ })).toBeDisabled()
+    expect(screen.getByText(/ยังไม่ได้กรอกประมาณการงานที่เหลือ/)).toBeInTheDocument()
+    expect(screen.getByText(/ยังไม่ได้กำหนดตัวคูณผลการดำเนินงานเอง/)).toBeInTheDocument()
+
+    const links = screen.getAllByRole('link', { name: 'ไปกรอกที่หน้าข้อมูลโครงการ →' })
+    expect(links).toHaveLength(2)
+    for (const link of links) {
+      expect(link).toHaveAttribute('href', '/app/project-1/info')
+    }
+  })
+
+  it('connects the ManualEtcPredatesBacChange warning to a real link back to Project Info (domain-rules.md §5.7)', async () => {
+    const stale: EvmResponseDto = { ...fixtureA, warnings: ['ManualEtcPredatesBacChange'] }
+    vi.mocked(api.getEvm).mockResolvedValueOnce(stale)
+    vi.mocked(api.listEvmSnapshots).mockResolvedValueOnce([])
+
+    renderPage('PM')
+
+    await waitFor(() =>
+      expect(screen.getByText(/มี Variation Order ที่อนุมัติแล้วเปลี่ยนงบประมาณ/)).toBeInTheDocument(),
+    )
+    const link = screen.getByRole('link', { name: 'ไปกรอกค่าประมาณการใหม่ที่หน้าข้อมูลโครงการ →' })
+    expect(link).toHaveAttribute('href', '/app/project-1/info')
   })
 })

@@ -4,6 +4,7 @@ using CMPlus.Application.Features.Photos.Commands.UploadPhoto;
 using CMPlus.Application.Features.Photos.Queries.GetPhotoContent;
 using CMPlus.Domain.Enums;
 using CMPlus.WebApi.ErrorHandling;
+using CMPlus.WebApi.Middleware;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -52,6 +53,7 @@ public sealed class ProjectPhotosController(ISender sender, IPhotoOptionsProvide
     [HttpPost]
     [Authorize(Roles = WriteRoles)]
     [RequestSizeLimit(MaxRequestBodyBytes)]
+    [Idempotent] // S13-BE-01: the outbox's one kind today (S12-FE-01) - see IdempotencyMiddleware's class remarks.
     public async Task<IActionResult> Upload(
         Guid projectId,
         IFormFile file,

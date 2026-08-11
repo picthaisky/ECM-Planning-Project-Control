@@ -4,6 +4,7 @@ using CMPlus.Application.Features.Weather.Commands.RecordWeatherLogCorrection;
 using CMPlus.Application.Features.Weather.Queries.ListWeatherLogs;
 using CMPlus.Domain.Enums;
 using CMPlus.WebApi.ErrorHandling;
+using CMPlus.WebApi.Middleware;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -49,6 +50,7 @@ public sealed class ProjectWeatherLogsController(ISender sender) : ControllerBas
 
     [HttpPost]
     [Authorize(Roles = WriteRoles)]
+    [Idempotent] // S13-BE-01: S13-FE-01 adds this kind to the outbox this sprint - see IdempotencyMiddleware's class remarks.
     public async Task<IActionResult> Record(
         Guid projectId, [FromBody] RecordWeatherLogRequest request, CancellationToken cancellationToken)
     {
@@ -72,6 +74,7 @@ public sealed class ProjectWeatherLogsController(ISender sender) : ControllerBas
 
     [HttpPost("{logId:guid}/corrections")]
     [Authorize(Roles = WriteRoles)]
+    [Idempotent] // S13-BE-01: same write-shape as Record above - see IdempotencyMiddleware's class remarks.
     public async Task<IActionResult> RecordCorrection(
         Guid projectId, Guid logId, [FromBody] RecordWeatherLogCorrectionRequest request, CancellationToken cancellationToken)
     {

@@ -2,7 +2,15 @@ import { AxiosError } from 'axios'
 import { apiClient } from '../../services/apiClient'
 import type { ProblemDetails } from '../auth/types'
 import { translateImportErrorCode } from './errorTranslation'
-import type { FileImportJob, ImportRouteFormat, Project, UpdateProjectPayload } from './types'
+import type {
+  FileImportJob,
+  ImportRouteFormat,
+  Project,
+  ProjectDetail,
+  SetEacAdvancedInputsPayload,
+  SetEacAdvancedInputsResult,
+  UpdateProjectPayload,
+} from './types'
 
 /**
  * Thrown by every function in this module with a Thai-first message ready to render directly —
@@ -118,11 +126,13 @@ const PROJECT_ERROR_TITLES: Record<string, string> = {
   // `type=".../problems/bad-request"`, `detail=<raw English FluentValidation message>`. Mapped here
   // to the same Thai message as 'validation-error' for that reason.
   'bad-request': 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
+  ProjectConcurrencyConflict: 'มีการเปลี่ยนแปลงข้อมูลโครงการนี้พร้อมกันจากที่อื่น กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง',
+  'concurrent-transition': 'มีการเปลี่ยนแปลงข้อมูลโครงการนี้พร้อมกันจากที่อื่น กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง',
 }
 
 const PROJECT_GENERIC_ERROR_MESSAGE = 'บันทึกข้อมูลโครงการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง'
 
-function toProjectApiError(error: unknown): ProjectApiError {
+function toProjectApiError(error: unknown, extraTitles?: Record<string, string>): ProjectApiError {
   if (error instanceof AxiosError) {
     const status = error.response?.status
     const problem = error.response?.data as ProblemDetails | undefined
@@ -131,36 +141,50 @@ function toProjectApiError(error: unknown): ProjectApiError {
     // DomainException message there and the stable bucket in the URL-shaped `type`
     // (".../problems/validation-error"/".../problems/bad-request") — try the code table against
     // both, in that order.
+    const table = extraTitles ? { ...PROJECT_ERROR_TITLES, ...extraTitles } : PROJECT_ERROR_TITLES
     const typeSlug = problem?.type?.split('/').pop()
-    const code = (problem?.detail && PROJECT_ERROR_TITLES[problem.detail] ? problem.detail : typeSlug) ?? ''
+    const code = (problem?.detail && table[problem.detail] ? problem.detail : typeSlug) ?? ''
     // Deliberately never falls back to `problem.detail`/`problem.title` here — both can be raw,
     // untranslated English server prose (a FluentValidation message, or a bare framework title)
     // for any error code this table does not yet know about, which must never reach a Thai-first
     // UI verbatim (conventions.md's "never leak" spirit, confirmed by a real 400 response during
     // this sprint's live-backend verification). An unmapped code always gets the generic Thai
     // message instead — never English leakage, only ever a slightly less specific Thai headline.
-    return new ProjectApiError(PROJECT_ERROR_TITLES[code] ?? PROJECT_GENERIC_ERROR_MESSAGE, status)
+    return new ProjectApiError(table[code] ?? PROJECT_GENERIC_ERROR_MESSAGE, status)
   }
   return new ProjectApiError(PROJECT_GENERIC_ERROR_MESSAGE)
 }
 
 /**
- * `GET /api/v1/projects/{projectId}` — the Project Info screen's "view" half (US-4.3/4.4).
+ * `GET /api/v1/projects/{projectId}` — the Project Info screen's "view" half (US-4.3/4.4), now
+ * also the S14-FE-02 source for the project's current EAC configuration (`ProjectEacConfig`).
  *
  * This endpoint does **not exist on the real backend yet**: Sprint 4 shipped
  * `PUT /api/v1/projects/{projectId}` (`UpdateProjectCommand`, whose response body already *is*
  * the `ProjectDto` this call expects) but no companion read query/controller action. Calling this
  * against the live API returns a 404 today. It is still implemented and wired up front-end-side —
- * typed against the exact existing `ProjectDto` shape, with a correct loading/error/empty state in
- * `ProjectMasterCard` — because a read-first-edit-second UX is the whole point of "view/edit" (the
- * S4-FE-02 DoD), and the natural backend fix is a trivial `GetProjectQuery` reusing `ProjectDto`
- * verbatim, not a new design. Flagged to `backend-developer`/`system-architect` as fast-follow
- * work; see this sprint's frontend report for the recommendation. Do not delete this function or
- * its call site to "fix" the 404 — the correct fix is adding the endpoint, not removing the read.
+ * typed against `ProjectDetail` (`ProjectDto`'s field set plus the S14 EAC config), with a correct
+ * loading/error/empty state in `ProjectMasterCard`/`EacAdvancedInputsCard` — because a
+ * read-first-edit-second UX is the whole point of "view/edit" (the S4-FE-02 DoD), and the natural
+ * backend fix is a trivial `GetProjectQuery` reusing `ProjectDto` verbatim, not a new design.
+ * Flagged to `backend-developer`/`system-architect` as fast-follow work.
+ *
+ * **S14-FE-02 extends this same gap, does not add a new one.** The backend's own `ProjectDto`
+ * *deliberately* excludes `eacVariantDefault`/`eacManualEtc`/`eacCustomPerformanceFactor` ("ADR-
+ * 0007(c)'s own dedicated, separately-audited action from Sprint 7, not part of this command" —
+ * that DTO's own doc comment) — correct for the `PUT` response, but it means there is genuinely no
+ * endpoint anywhere that returns the *current* value of `EacManualEtc`/`EacCustomPerformanceFactor`
+ * for a page reload (only `SetEacAdvancedInputsResultDto`/`SetEacVariantDefaultResultDto` do, and
+ * only right after a write). `EacAdvancedInputsCard`'s full-representation `PUT
+ * .../eac-advanced-inputs` needs to know the *current* value of the field the user is not editing
+ * (see `setEacAdvancedInputs`'s remarks) — so once `GetProjectQuery` is built, its response DTO
+ * must be a superset of `ProjectDto` carrying these three fields too, not just `ProjectDto` as
+ * originally scoped. Do not delete this function, its `ProjectEacConfig` fields, or its call sites
+ * to "fix" the 404 — the correct fix is building the endpoint to this exact shape.
  */
-export async function getProject(projectId: string): Promise<Project> {
+export async function getProject(projectId: string): Promise<ProjectDetail> {
   try {
-    const response = await apiClient.get<Project>(`/projects/${projectId}`)
+    const response = await apiClient.get<ProjectDetail>(`/projects/${projectId}`)
     return response.data
   } catch (error) {
     throw toProjectApiError(error)
@@ -173,6 +197,13 @@ export async function getProject(projectId: string): Promise<Project> {
  * — see `types.ts`'s remarks); the caller is responsible for having already validated ranges
  * client-side (`ProjectEditForm`) since this call still surfaces the server's own
  * defense-in-depth rejection verbatim via `ProjectApiError` when it disagrees.
+ *
+ * Returns the backend's real `ProjectDto` shape only (`Project`, not `ProjectDetail`) — this
+ * command never touches the EAC config fields (disjoint field set from
+ * `SetEacAdvancedInputsCommand`/`SetEacVariantDefaultCommand`), so its response genuinely does not
+ * carry them. `useProjectMasterData.save` merges this into the previously-loaded `ProjectDetail`
+ * rather than replacing it, precisely so an unrelated edit here (e.g. the project name) can never
+ * blank out the EAC fields on screen.
  */
 export async function updateProject(projectId: string, payload: UpdateProjectPayload): Promise<Project> {
   try {
@@ -180,6 +211,55 @@ export async function updateProject(projectId: string, payload: UpdateProjectPay
     return response.data
   } catch (error) {
     throw toProjectApiError(error)
+  }
+}
+
+const EAC_ADVANCED_INPUTS_ERROR_TITLES: Record<string, string> = {
+  // S14-BE-03 (ProjectErrorCodes): the symmetric "cannot clear while active" guard, approached
+  // from *this* direction (`Project.SetEacManualEtc`/`SetEacCustomPerformanceFactor`, invoked by
+  // `SetEacAdvancedInputsCommandHandler`) — distinct Thai copy from `features/evm/api.ts`'s own
+  // mapping of the *same* backend codes, which covers the opposite direction (selecting the variant
+  // while its input is unset). Both point the user at the *other* screen, since that is genuinely
+  // where the fix lives (S14-FE-02's explicit ask: "the 'where to set it' explanation needs to
+  // actually point somewhere useful").
+  ProjectEacManualEtcRequiredForBottomUpEtc:
+    'ไม่สามารถล้างค่านี้ได้ เนื่องจากตัวแปร EAC เริ่มต้นของโครงการปัจจุบันคือ Bottom-Up ETC ซึ่งใช้ค่านี้อยู่ — ไปเปลี่ยนตัวแปร EAC ที่หน้า EVM S-Curve ก่อน แล้วจึงกลับมาล้างค่านี้',
+  'eac-manual-etc-required-for-bottom-up-etc':
+    'ไม่สามารถล้างค่านี้ได้ เนื่องจากตัวแปร EAC เริ่มต้นของโครงการปัจจุบันคือ Bottom-Up ETC ซึ่งใช้ค่านี้อยู่ — ไปเปลี่ยนตัวแปร EAC ที่หน้า EVM S-Curve ก่อน แล้วจึงกลับมาล้างค่านี้',
+  ProjectEacCustomPerformanceFactorRequiredForCustomPf:
+    'ไม่สามารถล้างค่านี้ได้ เนื่องจากตัวแปร EAC เริ่มต้นของโครงการปัจจุบันคือ Custom PF ซึ่งใช้ค่านี้อยู่ — ไปเปลี่ยนตัวแปร EAC ที่หน้า EVM S-Curve ก่อน แล้วจึงกลับมาล้างค่านี้',
+  'eac-custom-performance-factor-required-for-custom-pf':
+    'ไม่สามารถล้างค่านี้ได้ เนื่องจากตัวแปร EAC เริ่มต้นของโครงการปัจจุบันคือ Custom PF ซึ่งใช้ค่านี้อยู่ — ไปเปลี่ยนตัวแปร EAC ที่หน้า EVM S-Curve ก่อน แล้วจึงกลับมาล้างค่านี้',
+}
+
+/** Same bodyless-403 shape as `features/evm/api.ts#EAC_DEFAULT_FORBIDDEN_MESSAGE` — PM/QS/Executive
+ * only server-side (`ProjectsController.SetEacAdvancedInputs`, ADR-0007(f)). */
+const EAC_ADVANCED_INPUTS_FORBIDDEN_MESSAGE = 'คุณไม่มีสิทธิ์ตั้งค่า EAC ขั้นสูงของโครงการนี้'
+
+/**
+ * `PUT /api/v1/projects/{projectId}/eac-advanced-inputs` (S14-BE-03) — real, live endpoint. Sets
+ * both `Project.EacManualEtc` (the `BottomUpEtc` input) and `Project.EacCustomPerformanceFactor`
+ * (the `CustomPf` input) together, **full-representation**: the backend's
+ * `SetEacAdvancedInputsCommandHandler` always calls both setters from whatever this payload
+ * carries, so a field omitted here is genuinely *cleared*, never "left alone". `EacAdvancedInputsCard`
+ * always echoes the other field's last-known value (from `ProjectDetail`/a prior successful save)
+ * rather than ever submitting a value it does not actually know, for exactly this reason.
+ */
+export async function setEacAdvancedInputs(
+  projectId: string,
+  payload: SetEacAdvancedInputsPayload,
+): Promise<SetEacAdvancedInputsResult> {
+  try {
+    const response = await apiClient.put<SetEacAdvancedInputsResult>(
+      `/projects/${projectId}/eac-advanced-inputs`,
+      payload,
+    )
+    return response.data
+  } catch (error) {
+    if (error instanceof AxiosError && error.response?.status === 403) {
+      throw new ProjectApiError(EAC_ADVANCED_INPUTS_FORBIDDEN_MESSAGE, 403)
+    }
+    throw toProjectApiError(error, EAC_ADVANCED_INPUTS_ERROR_TITLES)
   }
 }
 

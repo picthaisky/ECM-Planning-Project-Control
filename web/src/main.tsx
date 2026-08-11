@@ -2,8 +2,9 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
-import { ToastViewport } from './components'
+import { ToastViewport, UpdateAvailableBanner } from './components'
 import { createIndexedDbOutboxStorage, purgeExpiredSyncedItems, registerOutboxLogoutQuarantine } from './services/outbox'
+import { registerServiceWorker } from './services/registerServiceWorker'
 
 // H-02 (Sprint 12 security review) fix bullet 2: registered once, here, at app startup — not inside
 // any single feature — so it transparently covers every way a session can end (manual "ออกจากระบบ",
@@ -19,11 +20,19 @@ registerOutboxLogoutQuarantine()
 // Best-effort; must never block first paint.
 void purgeExpiredSyncedItems(createIndexedDbOutboxStorage()).catch(() => {})
 
+// S13-FE-02: precache + runtime cache + the update-available/reload flow, and the logout-time
+// runtime-cache clear (this service worker's own sibling to H-02's outbox quarantine above) — see
+// `src/sw.ts`'s module comment for the full design. No-op outside a production build (`import.meta.env.PROD`).
+registerServiceWorker()
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
     {/* Cross-cutting (S2-FE-01): renders toasts pushed from anywhere, e.g. apiClient.ts's 401
         "session expired" notice, regardless of which screen is currently mounted. */}
     <ToastViewport />
+    {/* Cross-cutting (S13-FE-02): a new deploy's "โหลดหน้าใหม่เพื่ออัปเดต" prompt, regardless of which
+        screen is currently mounted. */}
+    <UpdateAvailableBanner />
   </StrictMode>,
 )

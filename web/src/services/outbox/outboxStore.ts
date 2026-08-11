@@ -153,6 +153,30 @@ export function createOutboxStore(options: CreateOutboxStoreOptions) {
     })
   }
 
+  /**
+   * Terminal counterpart to `markFailed` for an `OutboxConflictError` (S13-FE-01, `errors.ts`) — the
+   * server has told us this exact payload, under this exact idempotency key, will never succeed by
+   * retrying it unmodified. `PENDING_STATUSES` excludes `'conflict'` so `pending()`/`flush()` never
+   * auto-retries it again; the only way out is a human decision (surfaced by `SyncStatusBadge.tsx`),
+   * not another background attempt.
+   *
+   * Clears `blob` for the same reason `markSynced` does: once this device knows blind resubmission is
+   * futile, the remedy is for the user to review and re-do the action (which means capturing fresh
+   * content), not silently resending the same stale bytes — so there is no reason to keep holding them.
+   */
+  async function markConflict(id: string, errorMessage: string): Promise<void> {
+    const item = await storage.get(id)
+    if (!item) return
+    await storage.put({
+      ...item,
+      status: 'conflict',
+      attemptCount: item.attemptCount + 1,
+      lastError: errorMessage,
+      updatedAt: now(),
+      blob: null,
+    })
+  }
+
   async function remove(id: string): Promise<void> {
     await storage.delete(id)
   }
@@ -210,7 +234,17 @@ export function createOutboxStore(options: CreateOutboxStoreOptions) {
     return stale.length
   }
 
-  return { enqueue, list, pending, markSyncing, markSynced, markFailed, remove, reconcileInterruptedSyncs }
+  return {
+    enqueue,
+    list,
+    pending,
+    markSyncing,
+    markSynced,
+    markFailed,
+    markConflict,
+    remove,
+    reconcileInterruptedSyncs,
+  }
 }
 
 export type OutboxStore = ReturnType<typeof createOutboxStore>

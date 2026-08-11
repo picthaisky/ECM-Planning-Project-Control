@@ -7,6 +7,7 @@ using CMPlus.Infrastructure;
 using CMPlus.WebApi.Auth;
 using CMPlus.WebApi.ErrorHandling;
 using CMPlus.WebApi.Json;
+using CMPlus.WebApi.Middleware;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
@@ -166,6 +167,18 @@ app.UseResponseCompression();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// S13-BE-01 (ADR-0005 US-13.1): Idempotency-Key support on the site-module write endpoints
+// ([Idempotent]-attributed actions only - see IdempotencyMiddleware's class remarks). Must run
+// AFTER UseAuthentication/UseAuthorization (needs the resolved tenant/user claims, and a request
+// that never authorizes must never reach - let alone reserve - a key) and AFTER
+// UseResponseCompression (so compression sees this middleware's final, restored plain bytes and
+// compresses them exactly as it would without this middleware, rather than compressing into, or
+// being bypassed by, its internal response buffer). Routing has already resolved the endpoint by
+// this point - no explicit UseRouting() call exists anywhere in this pipeline, so ASP.NET Core
+// inserts it implicitly at the very start (the same reason UseAuthorization, above, can already
+// see each action's [Authorize] metadata) - so `context.GetEndpoint()` reliably sees [Idempotent] too.
+app.UseMiddleware<IdempotencyMiddleware>();
 
 app.MapControllers();
 

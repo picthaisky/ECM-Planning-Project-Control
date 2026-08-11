@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { OutboxConflictError } from './errors'
 import { createOutboxStore } from './outboxStore'
 import { createInMemoryOutboxStorage } from './storage.inMemory'
 import { createSyncEngine } from './syncEngine'
@@ -29,7 +30,7 @@ describe('syncEngine.flush', () => {
 
     const result = await engine.flush()
 
-    expect(result).toEqual({ synced: 2, failed: 0, skippedUnknownKind: 0 })
+    expect(result).toEqual({ synced: 2, failed: 0, conflicted: 0, skippedUnknownKind: 0 })
     expect(uploader).toHaveBeenCalledTimes(2)
     const remaining = await store.pending()
     expect(remaining).toEqual([])
@@ -48,7 +49,7 @@ describe('syncEngine.flush', () => {
 
     const result = await engine.flush()
 
-    expect(result).toEqual({ synced: 0, failed: 1, skippedUnknownKind: 0 })
+    expect(result).toEqual({ synced: 0, failed: 1, conflicted: 0, skippedUnknownKind: 0 })
     const [reloaded] = await store.list()
     expect(reloaded.id).toBe(item.id)
     expect(reloaded.status).toBe('failed')
@@ -73,10 +74,10 @@ describe('syncEngine.flush', () => {
     const engine = createSyncEngine({ store, uploaders: { photo: uploader } })
 
     const first = await engine.flush()
-    expect(first).toEqual({ synced: 0, failed: 1, skippedUnknownKind: 0 })
+    expect(first).toEqual({ synced: 0, failed: 1, conflicted: 0, skippedUnknownKind: 0 })
 
     const second = await engine.flush()
-    expect(second).toEqual({ synced: 1, failed: 0, skippedUnknownKind: 0 })
+    expect(second).toEqual({ synced: 1, failed: 0, conflicted: 0, skippedUnknownKind: 0 })
     expect(await store.pending()).toEqual([])
   })
 
@@ -87,7 +88,7 @@ describe('syncEngine.flush', () => {
     const engine = createSyncEngine({ store, uploaders: { photo: vi.fn() } })
     const result = await engine.flush()
 
-    expect(result).toEqual({ synced: 0, failed: 0, skippedUnknownKind: 1 })
+    expect(result).toEqual({ synced: 0, failed: 0, conflicted: 0, skippedUnknownKind: 1 })
     const [reloaded] = await store.list()
     expect(reloaded.status).toBe('queued')
   })
@@ -114,7 +115,7 @@ describe('syncEngine.flush', () => {
     // after `firstFlush` is given the chance to run to completion.
     const secondFlush = await engine.flush()
 
-    expect(secondFlush).toEqual({ synced: 0, failed: 0, skippedUnknownKind: 0 })
+    expect(secondFlush).toEqual({ synced: 0, failed: 0, conflicted: 0, skippedUnknownKind: 0 })
 
     // `firstFlush`'s own chain (its `store.pending()`/`store.markSyncing()` calls) needs a few more
     // microtask ticks than `secondFlush`'s immediate early-return before it actually reaches the
@@ -149,5 +150,82 @@ describe('syncEngine.flush', () => {
 
     expect(onItemSynced).toHaveBeenCalledTimes(1)
     expect(onItemFailed).toHaveBeenCalledTimes(1)
+  })
+
+  describe('OutboxConflictError (S13-FE-01, idempotency 409)', () => {
+    it('routes a conflicting item to the terminal conflict status, distinct from an ordinary failure', async () => {
+      const store = makeStore()
+      const item = await store.enqueue({ kind: 'weather-log', payload: {} })
+
+      const uploader: OutboxUploader = vi.fn(async () => {
+        throw new OutboxConflictError('รายการนี้ถูกส่งไปแล้วด้วยข้อมูลอื่น')
+      })
+      const engine = createSyncEngine({ store, uploaders: { 'weather-log': uploader } })
+
+      const result = await engine.flush()
+
+      expect(result).toEqual({ synced: 0, failed: 0, conflicted: 1, skippedUnknownKind: 0 })
+      const [reloaded] = await store.list()
+      expect(reloaded.id).toBe(item.id)
+      expect(reloaded.status).toBe('conflict')
+      expect(reloaded.lastError).toBe('รายการนี้ถูกส่งไปแล้วด้วยข้อมูลอื่น')
+    })
+
+    it('never retries a conflicted item on a later flush — it is excluded from pending()', async () => {
+      const store = makeStore()
+      await store.enqueue({ kind: 'weather-log', payload: {} })
+
+      const uploader: OutboxUploader = vi.fn(async () => {
+        throw new OutboxConflictError('conflict')
+      })
+      const engine = createSyncEngine({ store, uploaders: { 'weather-log': uploader } })
+
+      await engine.flush()
+      expect(uploader).toHaveBeenCalledTimes(1)
+
+      const second = await engine.flush()
+      expect(second).toEqual({ synced: 0, failed: 0, conflicted: 0, skippedUnknownKind: 0 })
+      expect(uploader).toHaveBeenCalledTimes(1) // not called again
+    })
+
+    it('calls onItemConflicted, not onItemFailed, for a conflicted item', async () => {
+      const store = makeStore()
+      await store.enqueue({ kind: 'weather-log', payload: {} })
+
+      const uploader: OutboxUploader = vi.fn(async () => {
+        throw new OutboxConflictError('conflict')
+      })
+      const onItemFailed = vi.fn()
+      const onItemConflicted = vi.fn()
+      const engine = createSyncEngine({
+        store,
+        uploaders: { 'weather-log': uploader },
+        onItemFailed,
+        onItemConflicted,
+      })
+
+      await engine.flush()
+
+      expect(onItemFailed).not.toHaveBeenCalled()
+      expect(onItemConflicted).toHaveBeenCalledTimes(1)
+      expect(onItemConflicted.mock.calls[0][0]).toMatchObject({ status: 'conflict', lastError: 'conflict' })
+    })
+
+    it('one conflicted item does not block a sibling item in the same batch from succeeding', async () => {
+      const store = makeStore()
+      await store.enqueue({ kind: 'weather-log', payload: { which: 'conflict' } })
+      await store.enqueue({ kind: 'weather-log', payload: { which: 'ok' } })
+
+      const uploader: OutboxUploader = vi.fn(async (item) => {
+        const payload = item.payload as { which: string }
+        if (payload.which === 'conflict') throw new OutboxConflictError('conflict')
+        return { serverId: 'server-ok' }
+      })
+      const engine = createSyncEngine({ store, uploaders: { 'weather-log': uploader } })
+
+      const result = await engine.flush()
+
+      expect(result).toEqual({ synced: 1, failed: 0, conflicted: 1, skippedUnknownKind: 0 })
+    })
   })
 })

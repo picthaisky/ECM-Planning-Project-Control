@@ -1,5 +1,6 @@
 using CMPlus.Application.Abstractions;
 using CMPlus.Application.Approval;
+using CMPlus.Application.Features.Approval.Queries.SimulateRouting;
 using CMPlus.Application.Features.VariationOrder;
 using CMPlus.Application.Features.VariationOrder.Commands.Approve;
 using CMPlus.Application.Features.VariationOrder.Commands.Reject;
@@ -290,5 +291,39 @@ internal sealed class VariationOrderWorkflowHarness
         return await handler.Handle(
             new UpdateVariationOrderContentCommand(variationOrderId, "Re-priced", null, amount, timeImpactDays, scopeItems),
             CancellationToken.None);
+    }
+
+    /// <summary>S15-BE-01: the routing simulator, wired against real repositories on a real
+    /// <see cref="CmPlusDbContext"/> - the same collaborators <see cref="SubmitAsync"/> above uses
+    /// for the routing decision itself (<see cref="ApprovalPolicyReader"/>/<see cref="ApprovalRoutingService"/>),
+    /// so an integration-level agreement test genuinely exercises two independent EF Core round trips
+    /// against the SAME persisted state, not two calls into one shared in-memory fixture.</summary>
+    public async Task<Result<ApprovalRoutingSimulationDto>> SimulateAsync(ApprovalDocumentType documentType, Guid projectId, decimal amount)
+    {
+        using var context = CreateContext();
+        var handler = new SimulateApprovalRoutingQueryHandler(
+            new ApprovalPolicyReader(context),
+            new ApprovalRoutingService(),
+            new ProjectRepository(context),
+            new VariationOrderRepository(context),
+            Clock);
+
+        return await handler.Handle(new SimulateApprovalRoutingQuery(documentType, projectId, amount), CancellationToken.None);
+    }
+
+    /// <summary>Row-count snapshot of every table a Submit/Approve mutation could plausibly touch,
+    /// scoped to this harness's tenant by the same ambient global query filter (ADR-0002) every other
+    /// read in this harness relies on - no explicit TenantId predicate needed. S15-QA mutation
+    /// evidence: calling <see cref="SimulateAsync"/> must leave every one of these counts unchanged -
+    /// a query with genuinely zero side effects, not merely "the HTTP call returned 200".</summary>
+    public async Task<(int VariationOrders, int ApprovalPolicies, int ApprovalActions, int AuditLogs, int Projects)> CountAllRowsAsync()
+    {
+        using var context = CreateContext();
+        return (
+            await context.VariationOrders.CountAsync(),
+            await context.ApprovalPolicies.CountAsync(),
+            await context.ApprovalActions.CountAsync(),
+            await context.AuditLogs.CountAsync(),
+            await context.Projects.CountAsync());
     }
 }

@@ -327,9 +327,48 @@ public sealed class Project : Entity, ITenantOwned
     public void SetAdvanceRate(decimal? advanceRate) => AdvanceRate = PercentageGuard.Clamp(advanceRate);
 
     /// <summary>Restricted to PM/QS/Executive and audited at the Application layer (ADR-0007(c));
-    /// the Domain method itself only enforces the assignment, not the permission check.</summary>
-    public void SetEacVariantDefault(EacVariant variant) => EacVariantDefault = variant;
+    /// the Domain method itself only enforces the assignment, not the permission check.
+    ///
+    /// <para><b>S14-BE-03 (closes ADR-0007(d)'s deferred Sprint 14 gap):</b> a variant that reads
+    /// from a project-supplied input (<see cref="EacVariant.BottomUpEtc"/> needs
+    /// <see cref="EacManualEtc"/>, <see cref="EacVariant.CustomPf"/> needs
+    /// <see cref="EacCustomPerformanceFactor"/>) cannot be selected while that input is unset -
+    /// otherwise the EVM screen would switch to a variant that immediately renders "—"
+    /// (<c>EacNullReason.ManualEtcNotSet</c>/<c>CustomPfNotSet</c>) with no indication why. This is
+    /// a genuine invariant of this aggregate (it owns all three fields), so it is enforced here as
+    /// defense in depth - <c>SetEacVariantDefaultCommandHandler</c> pre-checks the same condition
+    /// first, to return a specific, actionable error code rather than the generic
+    /// "domain-rule-violation" 400 this throw would otherwise surface as (same reasoning
+    /// <c>UpdateProjectCommandHandler</c>'s BAC-lock pre-check gives for ADR-0017's Domain
+    /// guard).</para>
+    /// </summary>
+    public void SetEacVariantDefault(EacVariant variant)
+    {
+        if (variant == EacVariant.BottomUpEtc && EacManualEtc is null)
+        {
+            throw new DomainException(
+                "EacVariantDefault cannot be set to BottomUpEtc while EacManualEtc is not configured. " +
+                "Set EacManualEtc first.");
+        }
 
+        if (variant == EacVariant.CustomPf && EacCustomPerformanceFactor is null)
+        {
+            throw new DomainException(
+                "EacVariantDefault cannot be set to CustomPf while EacCustomPerformanceFactor is not configured. " +
+                "Set EacCustomPerformanceFactor first.");
+        }
+
+        EacVariantDefault = variant;
+    }
+
+    /// <summary>
+    /// S14-BE-03. The symmetric half of <see cref="SetEacVariantDefault"/>'s guard: clearing this
+    /// input while <see cref="EacVariantDefault"/> is currently <see cref="EacVariant.CustomPf"/>
+    /// would leave the active variant with no performance factor to compute from, the same dangling
+    /// state the variant-switch guard prevents approaching from the other direction (closing the
+    /// gap both ways, the same discipline ADR-0016 applied to approval quorum). To switch away
+    /// first, call <see cref="SetEacVariantDefault"/> with a different variant, then clear this.
+    /// </summary>
     public void SetEacCustomPerformanceFactor(decimal? performanceFactor)
     {
         if (performanceFactor is <= 0)
@@ -337,9 +376,18 @@ public sealed class Project : Entity, ITenantOwned
             throw new DomainException("EacCustomPerformanceFactor must be greater than zero when supplied.");
         }
 
+        if (performanceFactor is null && EacVariantDefault == EacVariant.CustomPf)
+        {
+            throw new DomainException(
+                "EacCustomPerformanceFactor cannot be cleared while EacVariantDefault is CustomPf. " +
+                "Switch EacVariantDefault away from CustomPf first.");
+        }
+
         EacCustomPerformanceFactor = performanceFactor;
     }
 
+    /// <summary>S14-BE-03. Symmetric guard mirroring <see cref="SetEacCustomPerformanceFactor"/>'s
+    /// own remarks, for <see cref="EacVariant.BottomUpEtc"/> instead.</summary>
     public void SetEacManualEtc(decimal? manualEtc)
     {
         if (manualEtc is < 0)
@@ -347,11 +395,21 @@ public sealed class Project : Entity, ITenantOwned
             throw new DomainException("EacManualEtc cannot be negative.");
         }
 
+        if (manualEtc is null && EacVariantDefault == EacVariant.BottomUpEtc)
+        {
+            throw new DomainException(
+                "EacManualEtc cannot be cleared while EacVariantDefault is BottomUpEtc. " +
+                "Switch EacVariantDefault away from BottomUpEtc first.");
+        }
+
         EacManualEtc = manualEtc;
 
         // domain-rules.md §5.7: a QS re-entering the manual ETC is exactly the event that clears the
         // staleness this sprint's VO approval effect stamps - never cleared by anything else (in
-        // particular, never by time passing or by a later VO of its own).
+        // particular, never by time passing or by a later VO of its own). Applies even when the new
+        // value is null (deliberately clearing the estimate while a different variant is active) -
+        // "no manual ETC configured" is not itself a stale state, so there is nothing left to warn
+        // about either way.
         EacManualEtcStaleSince = null;
     }
 

@@ -105,22 +105,24 @@ describe('features/weather/api', () => {
       affectedActivityIds: [],
     }
 
-    it('posts to the weather-logs endpoint and returns the created entry', async () => {
+    it('posts to the weather-logs endpoint with the Idempotency-Key header and returns the created entry', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce({ data: sampleLog })
 
-      const result = await recordWeatherLog('project-1', payload)
+      const result = await recordWeatherLog('project-1', payload, 'idem-key-1')
 
-      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/weather-logs', payload)
+      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/weather-logs', payload, {
+        headers: { 'Idempotency-Key': 'idem-key-1' },
+      })
       expect(result).toEqual(sampleLog)
     })
 
     it('translates WeatherLogUnknownActivity by its detail code', async () => {
       const problem = { detail: 'WeatherLogUnknownActivity', type: 'https://cmplus.dev/problems/weather-log-unknown-activity' }
       vi.mocked(apiClient.post).mockRejectedValueOnce(makeError(400, problem))
-      await expect(recordWeatherLog('project-1', payload)).rejects.toBeInstanceOf(WeatherApiError)
+      await expect(recordWeatherLog('project-1', payload, 'idem-key-2')).rejects.toBeInstanceOf(WeatherApiError)
 
       vi.mocked(apiClient.post).mockRejectedValueOnce(makeError(400, problem))
-      await expect(recordWeatherLog('project-1', payload)).rejects.toMatchObject({
+      await expect(recordWeatherLog('project-1', payload, 'idem-key-3')).rejects.toMatchObject({
         message: expect.stringContaining('รหัสกิจกรรม'),
         status: 400,
       })
@@ -130,7 +132,7 @@ describe('features/weather/api', () => {
       vi.mocked(apiClient.post).mockRejectedValueOnce(
         makeError(405, { detail: 'SomeUnknownDetail', type: 'https://cmplus.dev/problems/weather-log-is-immutable' }),
       )
-      await expect(recordWeatherLog('project-1', payload)).rejects.toMatchObject({
+      await expect(recordWeatherLog('project-1', payload, 'idem-key-4')).rejects.toMatchObject({
         message: expect.stringContaining('บันทึกรายการแก้ไขใหม่แทน'),
       })
     })
@@ -150,18 +152,20 @@ describe('features/weather/api', () => {
       affectedActivityIds: [],
     }
 
-    it('posts to the corrections sub-route of the target log id', async () => {
+    it('posts to the corrections sub-route of the target log id with the Idempotency-Key header', async () => {
       vi.mocked(apiClient.post).mockResolvedValueOnce({ data: { ...sampleLog, id: 'log-2', entryKind: 'Correction' } })
 
-      const result = await recordWeatherLogCorrection('project-1', 'log-1', payload)
+      const result = await recordWeatherLogCorrection('project-1', 'log-1', payload, 'idem-key-5')
 
-      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/weather-logs/log-1/corrections', payload)
+      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/weather-logs/log-1/corrections', payload, {
+        headers: { 'Idempotency-Key': 'idem-key-5' },
+      })
       expect(result.entryKind).toBe('Correction')
     })
 
     it('translates WeatherLogAlreadySuperseded (the load-bearing chain-tail error)', async () => {
       vi.mocked(apiClient.post).mockRejectedValueOnce(makeError(409, { detail: 'WeatherLogAlreadySuperseded' }))
-      await expect(recordWeatherLogCorrection('project-1', 'log-1', payload)).rejects.toMatchObject({
+      await expect(recordWeatherLogCorrection('project-1', 'log-1', payload, 'idem-key-6')).rejects.toMatchObject({
         message: expect.stringContaining('โหลดข้อมูลใหม่'),
         status: 409,
       })

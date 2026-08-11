@@ -6,7 +6,7 @@ import type { WbsTreeDto } from './types'
 
 vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
-  return { ...actual, getWbsTree: vi.fn() }
+  return { ...actual, getWbsTreeWithCacheInfo: vi.fn() }
 })
 
 const sampleTree: WbsTreeDto = {
@@ -36,11 +36,11 @@ const sampleTree: WbsTreeDto = {
 
 describe('useWbsTree', () => {
   beforeEach(() => {
-    vi.mocked(api.getWbsTree).mockReset()
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockReset()
   })
 
   it('loads the tree on mount and flattens to root-only rows by default', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValueOnce(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleTree, servedFromOfflineCache: false })
     const { result } = renderHook(() => useWbsTree('project-1'))
 
     expect(result.current.loadState).toBe('loading')
@@ -49,7 +49,7 @@ describe('useWbsTree', () => {
   })
 
   it('toggleNode expands a node to reveal its children', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValueOnce(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleTree, servedFromOfflineCache: false })
     const { result } = renderHook(() => useWbsTree('project-1'))
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
@@ -61,7 +61,7 @@ describe('useWbsTree', () => {
   })
 
   it('expandAll/collapseAll toggle every node at once', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValueOnce(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleTree, servedFromOfflineCache: false })
     const { result } = renderHook(() => useWbsTree('project-1'))
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
@@ -73,10 +73,28 @@ describe('useWbsTree', () => {
   })
 
   it('surfaces a Thai error state on load failure', async () => {
-    vi.mocked(api.getWbsTree).mockRejectedValueOnce(new api.WbsApiError('ไม่พบโครงการที่ระบุ', 404))
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockRejectedValueOnce(new api.WbsApiError('ไม่พบโครงการที่ระบุ', 404))
     const { result } = renderHook(() => useWbsTree('project-1'))
 
     await waitFor(() => expect(result.current.loadState).toBe('error'))
     expect(result.current.loadError).toBe('ไม่พบโครงการที่ระบุ')
+  })
+
+  describe('S13-FE-02: offline-cache badge', () => {
+    it('defaults servedFromOfflineCache to false for a live response', async () => {
+      vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleTree, servedFromOfflineCache: false })
+      const { result } = renderHook(() => useWbsTree('project-1'))
+      await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+      expect(result.current.servedFromOfflineCache).toBe(false)
+    })
+
+    it('surfaces servedFromOfflineCache: true when the service worker served this response from its runtime cache', async () => {
+      vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValueOnce({ tree: sampleTree, servedFromOfflineCache: true })
+      const { result } = renderHook(() => useWbsTree('project-1'))
+      await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+      expect(result.current.servedFromOfflineCache).toBe(true)
+    })
   })
 })

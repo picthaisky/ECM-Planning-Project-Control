@@ -1,5 +1,6 @@
 using CMPlus.Application.Abstractions;
 using CMPlus.Infrastructure.Auth;
+using CMPlus.Infrastructure.Idempotency;
 using CMPlus.Infrastructure.Import;
 using CMPlus.Infrastructure.Parsers.Excel;
 using CMPlus.Infrastructure.Parsers.Mspdi;
@@ -96,6 +97,12 @@ public static class DependencyInjection
         // ApprovalPolicy/ApprovalAction/RowVersion machinery unchanged.
         services.AddScoped<IVariationOrderRepository, VariationOrderRepository>();
 
+        // S15-BE-01: policy version history, composed from ApprovalPolicy + AuditLog only (no new
+        // table). The routing simulator itself needs no new registration - it reuses
+        // IApprovalPolicyReader/IApprovalRoutingService/IProjectRepository/IVariationOrderRepository,
+        // all already registered above.
+        services.AddScoped<IApprovalPolicyHistoryReader, ApprovalPolicyHistoryReader>();
+
         // S11-BE-01/03: immutable DailyWeatherLog (IAppendOnly, guarded by AppendOnlyGuardInterceptor
         // registered above) and the IssueLog Open->Doing->Closed state machine.
         services.AddScoped<IDailyWeatherLogRepository, DailyWeatherLogRepository>();
@@ -119,6 +126,24 @@ public static class DependencyInjection
         // AppendOnlyGuardInterceptor registered above) and the Productivity Index read side.
         services.AddScoped<IManpowerEquipmentLogRepository, ManpowerEquipmentLogRepository>();
         services.AddScoped<IProductivityIndexReader, ProductivityIndexReader>();
+
+        // S13-BE-01/S13-DB-01 (ADR-0005 US-13.1): Idempotency-Key support on the site-module write
+        // endpoints, closing security review sprint-12.md M-01. IdempotencyKeyLock is a singleton
+        // (shared in-process lock table across every request - see its own remarks); EfIdempotencyStore
+        // is Scoped (shares the ambient, per-request CmPlusDbContext) and is registered once, then
+        // exposed under both interfaces it implements so IdempotencyMiddleware (request-time) and
+        // IdempotencyKeyCleanupService (background sweep) each see only the surface meant for them.
+        // S14-BE-01/02: Baseline capture/activation and the current-vs-baseline delta comparison.
+        services.AddScoped<IBaselineRepository, BaselineRepository>();
+        services.AddScoped<IBaselineComparisonReader, BaselineComparisonReader>();
+
+        services.AddOptions<IdempotencyOptions>().Bind(configuration.GetSection(IdempotencyOptions.SectionName));
+        services.AddSingleton<IIdempotencyOptionsProvider, IdempotencyOptionsProvider>();
+        services.AddSingleton<IIdempotencyKeyLock, IdempotencyKeyLock>();
+        services.AddScoped<EfIdempotencyStore>();
+        services.AddScoped<IIdempotencyStore>(sp => sp.GetRequiredService<EfIdempotencyStore>());
+        services.AddScoped<IIdempotencyKeyMaintenance>(sp => sp.GetRequiredService<EfIdempotencyStore>());
+        services.AddHostedService<IdempotencyKeyCleanupService>();
 
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();

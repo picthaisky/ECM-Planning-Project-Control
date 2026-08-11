@@ -1,5 +1,6 @@
 ﻿using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
+using CMPlus.Domain.Enums;
 using MediatR;
 
 namespace CMPlus.Application.Features.Projects.Commands.SetEacVariantDefault;
@@ -14,6 +15,22 @@ public sealed class SetEacVariantDefaultCommandHandler(IProjectRepository reposi
         if (project is null)
         {
             return Result<SetEacVariantDefaultResultDto>.Failure(ProjectErrorCodes.NotFound);
+        }
+
+        // S14-BE-03 (closes ADR-0007(d)'s deferred Sprint 14 UI gap): BottomUpEtc/CustomPf each need
+        // their own project-level input already configured before they can be selected - otherwise
+        // the EVM screen would switch to a variant that immediately renders "-" with no explanation.
+        // Pre-checked here for a specific, actionable error code; Project.SetEacVariantDefault below
+        // carries the identical guard as defense in depth (e.g. for a future caller that reaches it
+        // directly), which is why this can never actually throw in a well-formed request.
+        if (request.Variant == EacVariant.BottomUpEtc && project.EacManualEtc is null)
+        {
+            return Result<SetEacVariantDefaultResultDto>.Failure(ProjectErrorCodes.EacManualEtcRequiredForBottomUpEtc);
+        }
+
+        if (request.Variant == EacVariant.CustomPf && project.EacCustomPerformanceFactor is null)
+        {
+            return Result<SetEacVariantDefaultResultDto>.Failure(ProjectErrorCodes.EacCustomPerformanceFactorRequiredForCustomPf);
         }
 
         project.SetEacVariantDefault(request.Variant);

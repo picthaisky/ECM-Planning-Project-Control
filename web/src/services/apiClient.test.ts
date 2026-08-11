@@ -1,7 +1,7 @@
 import { AxiosError, AxiosHeaders } from 'axios'
-import type { InternalAxiosRequestConfig } from 'axios'
+import type { AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { attachAuthHeader, handleResponseError } from './apiClient'
+import { attachAuthHeader, handleResponseError, isServedFromOfflineCache } from './apiClient'
 import { useAuthStore } from '../store/authStore'
 import { useToastStore } from '../store/toastStore'
 
@@ -91,6 +91,23 @@ describe('apiClient interceptors', () => {
 
       expect(useToastStore.getState().toasts).toHaveLength(0)
       expect(window.location.assign).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('isServedFromOfflineCache (S13-FE-02)', () => {
+    it('is false for an ordinary live response with no such header', () => {
+      const response = { headers: {} } as AxiosResponse
+      expect(isServedFromOfflineCache(response)).toBe(false)
+    })
+
+    it('is true when the service worker\'s cache-fallback header is present', () => {
+      const response = { headers: { 'x-cm-served-from': 'sw-cache' } } as unknown as AxiosResponse
+      expect(isServedFromOfflineCache(response)).toBe(true)
+    })
+
+    it('is false for an unrelated header value (never a loose truthy check)', () => {
+      const response = { headers: { 'x-cm-served-from': 'something-else' } } as unknown as AxiosResponse
+      expect(isServedFromOfflineCache(response)).toBe(false)
     })
   })
 })

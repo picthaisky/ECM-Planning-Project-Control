@@ -43,12 +43,13 @@ public class SetEacVariantDefaultCommandHandlerTests
         Assert.Equal(0, repository.SaveChangesCallCount);
     }
 
+    // BottomUpEtc/CustomPf are deliberately NOT in this theory any more (S14-BE-03): each needs its
+    // own project-level input already configured, which CreateProject()'s fixture never sets - see
+    // the dedicated tests below for both directions of that guard.
     [Theory]
     [InlineData(EacVariant.CpiBased)]
     [InlineData(EacVariant.Atypical)]
     [InlineData(EacVariant.CpiSpiBased)]
-    [InlineData(EacVariant.BottomUpEtc)]
-    [InlineData(EacVariant.CustomPf)]
     public async Task Handle_Sets_The_Projects_Default_Variant_And_Saves_Once(EacVariant variant)
     {
         var project = CreateProject();
@@ -62,6 +63,70 @@ public class SetEacVariantDefaultCommandHandlerTests
         Assert.Equal(1, repository.SaveChangesCallCount);
         Assert.Equal(project.Id, result.Value.ProjectId);
         Assert.Equal(variant, result.Value.EacVariantDefault);
+    }
+
+    // ------------------------------------------------------------------------------------
+    // S14-BE-03: BottomUpEtc/CustomPf each need their own project-level input already configured.
+    // ------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Handle_Returns_400_When_Switching_To_BottomUpEtc_Without_EacManualEtc_Configured()
+    {
+        var project = CreateProject();
+        var repository = new FakeProjectRepository { ProjectToReturn = project };
+        var handler = new SetEacVariantDefaultCommandHandler(repository);
+
+        var result = await handler.Handle(new SetEacVariantDefaultCommand(project.Id, EacVariant.BottomUpEtc), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ProjectErrorCodes.EacManualEtcRequiredForBottomUpEtc, result.Error);
+        Assert.Equal(EacVariant.CpiBased, project.EacVariantDefault); // unchanged
+        Assert.Equal(0, repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Handle_Returns_400_When_Switching_To_CustomPf_Without_EacCustomPerformanceFactor_Configured()
+    {
+        var project = CreateProject();
+        var repository = new FakeProjectRepository { ProjectToReturn = project };
+        var handler = new SetEacVariantDefaultCommandHandler(repository);
+
+        var result = await handler.Handle(new SetEacVariantDefaultCommand(project.Id, EacVariant.CustomPf), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ProjectErrorCodes.EacCustomPerformanceFactorRequiredForCustomPf, result.Error);
+        Assert.Equal(EacVariant.CpiBased, project.EacVariantDefault); // unchanged
+        Assert.Equal(0, repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Handle_Switches_To_BottomUpEtc_When_EacManualEtc_Is_Already_Configured()
+    {
+        var project = CreateProject();
+        project.SetEacManualEtc(760_000.00m);
+        var repository = new FakeProjectRepository { ProjectToReturn = project };
+        var handler = new SetEacVariantDefaultCommandHandler(repository);
+
+        var result = await handler.Handle(new SetEacVariantDefaultCommand(project.Id, EacVariant.BottomUpEtc), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(EacVariant.BottomUpEtc, project.EacVariantDefault);
+        Assert.Equal(1, repository.SaveChangesCallCount);
+    }
+
+    [Fact]
+    public async Task Handle_Switches_To_CustomPf_When_EacCustomPerformanceFactor_Is_Already_Configured()
+    {
+        var project = CreateProject();
+        project.SetEacCustomPerformanceFactor(1.20m);
+        var repository = new FakeProjectRepository { ProjectToReturn = project };
+        var handler = new SetEacVariantDefaultCommandHandler(repository);
+
+        var result = await handler.Handle(new SetEacVariantDefaultCommand(project.Id, EacVariant.CustomPf), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(EacVariant.CustomPf, project.EacVariantDefault);
+        Assert.Equal(1, repository.SaveChangesCallCount);
     }
 
     [Fact]

@@ -9,10 +9,11 @@ import {
   importFile,
   ImportApiError,
   ProjectApiError,
+  setEacAdvancedInputs,
   updateProject,
 } from './api'
 import { apiClient } from '../../services/apiClient'
-import type { FileImportJob, Project, UpdateProjectPayload } from './types'
+import type { FileImportJob, Project, ProjectDetail, UpdateProjectPayload } from './types'
 
 vi.mock('../../services/apiClient', () => ({
   apiClient: { get: vi.fn(), post: vi.fn(), put: vi.fn() },
@@ -187,14 +188,22 @@ describe('features/info/api', () => {
     advanceRecoveryEndPct: null,
   }
 
+  const sampleProjectDetail: ProjectDetail = {
+    ...sampleProject,
+    eacVariantDefault: 'CpiBased',
+    eacManualEtc: null,
+    eacCustomPerformanceFactor: null,
+    eacManualEtcStaleSince: null,
+  }
+
   describe('getProject', () => {
-    it('fetches the project by id (S4-FE-02 view half)', async () => {
-      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: sampleProject })
+    it('fetches the project (S4-FE-02 view half) including its S14 EAC config', async () => {
+      vi.mocked(apiClient.get).mockResolvedValueOnce({ data: sampleProjectDetail })
 
       const result = await getProject('project-1')
 
       expect(apiClient.get).toHaveBeenCalledWith('/projects/project-1')
-      expect(result).toEqual(sampleProject)
+      expect(result).toEqual(sampleProjectDetail)
     })
 
     it('translates a 404 ProjectNotFound to a Thai ProjectApiError', async () => {
@@ -280,6 +289,76 @@ describe('features/info/api', () => {
         name: 'ProjectApiError',
         message: 'ข้อมูลไม่ถูกต้อง กรุณาตรวจสอบค่าที่กรอกอีกครั้ง',
         status: 400,
+      })
+    })
+  })
+
+  describe('setEacAdvancedInputs (S14-BE-03)', () => {
+    it('PUTs both fields (full-representation) and returns the fresh result', async () => {
+      vi.mocked(apiClient.put).mockResolvedValueOnce({
+        data: {
+          projectId: 'project-1',
+          eacManualEtc: '760000.00',
+          eacCustomPerformanceFactor: '1.2000',
+          eacManualEtcStaleSince: null,
+        },
+      })
+
+      const result = await setEacAdvancedInputs('project-1', {
+        eacManualEtc: '760000.00',
+        eacCustomPerformanceFactor: '1.2000',
+      })
+
+      expect(apiClient.put).toHaveBeenCalledWith('/projects/project-1/eac-advanced-inputs', {
+        eacManualEtc: '760000.00',
+        eacCustomPerformanceFactor: '1.2000',
+      })
+      expect(result.eacManualEtc).toBe('760000.00')
+      expect(result.eacManualEtcStaleSince).toBeNull()
+    })
+
+    it('translates the "cannot clear while active" guard (ProjectEacManualEtcRequiredForBottomUpEtc) to a Thai message pointing at the EVM screen', async () => {
+      vi.mocked(apiClient.put).mockRejectedValueOnce(
+        makeError(400, {
+          type: 'https://cmplus.dev/problems/eac-manual-etc-required-for-bottom-up-etc',
+          detail: 'ProjectEacManualEtcRequiredForBottomUpEtc',
+        }),
+      )
+
+      await expect(
+        setEacAdvancedInputs('project-1', { eacManualEtc: null, eacCustomPerformanceFactor: null }),
+      ).rejects.toMatchObject({
+        name: 'ProjectApiError',
+        status: 400,
+        message: expect.stringContaining('EVM S-Curve'),
+      })
+    })
+
+    it('translates the CustomPf equivalent guard to its own Thai message', async () => {
+      vi.mocked(apiClient.put).mockRejectedValueOnce(
+        makeError(400, {
+          type: 'https://cmplus.dev/problems/eac-custom-performance-factor-required-for-custom-pf',
+          detail: 'ProjectEacCustomPerformanceFactorRequiredForCustomPf',
+        }),
+      )
+
+      await expect(
+        setEacAdvancedInputs('project-1', { eacManualEtc: null, eacCustomPerformanceFactor: null }),
+      ).rejects.toMatchObject({
+        name: 'ProjectApiError',
+        message: expect.stringContaining('Custom PF'),
+      })
+    })
+
+    it('maps a bodyless 403 to a specific Thai permission message, not the generic fallback', async () => {
+      vi.mocked(apiClient.put).mockRejectedValueOnce(makeError(403, undefined))
+
+      await expect(
+        setEacAdvancedInputs('project-1', { eacManualEtc: '1.00', eacCustomPerformanceFactor: null }),
+      ).rejects.toMatchObject({
+        name: 'ProjectApiError',
+        status: 403,
+        message: 'คุณไม่มีสิทธิ์ตั้งค่า EAC ขั้นสูงของโครงการนี้',
       })
     })
   })

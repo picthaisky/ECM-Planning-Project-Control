@@ -1,6 +1,7 @@
 using CMPlus.Application.Features.Progress.Commands.BatchRecordProgress;
 using CMPlus.Domain.Enums;
 using CMPlus.WebApi.ErrorHandling;
+using CMPlus.WebApi.Middleware;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -20,6 +21,7 @@ namespace CMPlus.WebApi.Controllers.Progress;
 public sealed class ProgressController(ISender sender) : ControllerBase
 {
     [HttpPost("batch")]
+    [Idempotent] // S13-BE-01: S13-FE-01 adds this kind to the outbox this sprint - see IdempotencyMiddleware's class remarks.
     public async Task<IActionResult> RecordBatch(
         Guid projectId, [FromBody] BatchRecordProgressRequest request, CancellationToken cancellationToken)
     {

@@ -1,6 +1,7 @@
 ﻿using CMPlus.Application.Approval;
 using CMPlus.Application.Common;
 using CMPlus.Application.Features.ActualCosts;
+using CMPlus.Application.Features.Baseline;
 using CMPlus.Application.Features.Approval;
 using CMPlus.Application.Features.CashFlow;
 using CMPlus.Application.Features.Cpm;
@@ -16,6 +17,7 @@ using CMPlus.Application.Features.Projects;
 using CMPlus.Application.Features.Progress;
 using CMPlus.Application.Features.VariationOrder;
 using CMPlus.Application.Features.Weather;
+using CMPlus.Application.Idempotency;
 using CMPlus.Application.Import;
 using CMPlus.Application.Services.Cpm;
 using CMPlus.Application.Wbs;
@@ -50,6 +52,15 @@ public static class ResultProblemMapper
             // the escalation test (the exact defect the shipped ApprovalRoutingService.cs:66 had).
             [ApprovalErrorCodes.ContractValueNotConfigured] = (StatusCodes.Status422UnprocessableEntity, "contract-value-not-configured", "The project's baseline contract value is not configured; cumulative-VO escalation cannot be evaluated."),
             ["ApprovalPolicyNotFound"] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            // Same-shape concurrent-request race as BaselineErrorCodes.ConcurrencyConflict (see that
+            // entry's remarks) - found during the S14-BE-01 Baseline fix's own review and fixed here
+            // for ApprovalPolicy too (ApprovalPolicyConfiguration ships the identical filtered-unique-
+            // index shape).
+            [ApprovalPolicyErrorCodes.ConcurrencyConflict] = (StatusCodes.Status409Conflict, "concurrent-transition", "Another action has already changed the active approval policy for this document type. Reload and try again."),
+
+            // S15-BE-01: SimulateApprovalRoutingQuery. ApprovalErrorCodes.PolicyGap/
+            // ContractValueNotConfigured above are reused as-is by the simulator, not duplicated here.
+            [ApprovalSimulationErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
 
             // S3-BE-01..04: import pipeline. Note that a rejected/failed *file* (size cap, cycle,
             // XXE, malformed content) is deliberately NOT one of these - ImportScheduleFileCommand/
@@ -144,6 +155,10 @@ public static class ResultProblemMapper
             [VariationOrderErrorCodes.ConcurrencyConflict] = (StatusCodes.Status409Conflict, "concurrent-transition", "Another action has already changed this document. Reload and try again."),
             [ProjectErrorCodes.ConcurrencyConflict] = (StatusCodes.Status409Conflict, "concurrent-transition", "Another action has already changed this project. Reload and try again."),
             [ProjectErrorCodes.BacLockedByApprovedVariationOrders] = (StatusCodes.Status409Conflict, "bac-locked-by-variation-orders", "Budget at completion is derived from the original budget plus approved Variation Orders and cannot be edited directly. Raise a Variation Order instead."),
+            // S14-BE-03: SetEacVariantDefaultCommand/SetEacAdvancedInputsCommand's shared guard,
+            // approached from either direction (selecting the variant vs clearing its input).
+            [ProjectErrorCodes.EacManualEtcRequiredForBottomUpEtc] = (StatusCodes.Status400BadRequest, "eac-manual-etc-required-for-bottom-up-etc", "EacManualEtc must be configured before EacVariantDefault can be BottomUpEtc."),
+            [ProjectErrorCodes.EacCustomPerformanceFactorRequiredForCustomPf] = (StatusCodes.Status400BadRequest, "eac-custom-performance-factor-required-for-custom-pf", "EacCustomPerformanceFactor must be configured before EacVariantDefault can be CustomPf."),
             [VariationOrderErrorCodes.CorruptApprovalChain] = (StatusCodes.Status409Conflict, "corrupt-approval-chain", "This document's approval chain could not be resolved. Contact support."),
             [VariationOrderErrorCodes.WithdrawAfterVoteCast] = (StatusCodes.Status409Conflict, "document-immutable", "This document already has at least one vote recorded this revision and can no longer be withdrawn."),
             // domain-rules.md §5.1's non-negativity guard.
@@ -220,6 +235,28 @@ public static class ResultProblemMapper
             // §4.7: the deliberate 405 for the routes that do not exist for this aggregate.
             [ManpowerLogErrorCodes.IsImmutable] = (StatusCodes.Status405MethodNotAllowed, "manpower-log-is-immutable", "Manpower log entries cannot be updated or deleted. Submit a correction instead."),
             [ManpowerLogErrorCodes.InvalidDateRange] = (StatusCodes.Status400BadRequest, "manpower-log-invalid-date-range", "The 'from' date must not be later than the 'to' date."),
+
+            // S13-BE-01 (US-13.1, ADR-0005): IdempotencyMiddleware. Not a MediatR handler, so these
+            // never flow through a Result - the middleware calls ResultProblemMapper.ToProblemDetails
+            // directly so every error this API returns still shares one ProblemDetails shape/table.
+            [IdempotencyErrorCodes.PayloadMismatch] = (StatusCodes.Status409Conflict, "idempotency-payload-mismatch", "This Idempotency-Key was already used with a different request. Use a new key for a different operation."),
+            [IdempotencyErrorCodes.RequestInProgress] = (StatusCodes.Status409Conflict, "idempotency-request-in-progress", "A request with this Idempotency-Key is already being processed. Retry shortly."),
+            [IdempotencyErrorCodes.ActorRequired] = (StatusCodes.Status401Unauthorized, "idempotency-actor-required", "The current request has no resolvable authenticated user."),
+            [IdempotencyErrorCodes.KeyInvalid] = (StatusCodes.Status400BadRequest, "idempotency-key-invalid", "The Idempotency-Key header must be a single, non-empty value no longer than 200 characters."),
+            [IdempotencyErrorCodes.ResponseNotReplayable] = (StatusCodes.Status409Conflict, "idempotency-response-not-replayable", "The response for this Idempotency-Key could not be safely replayed. Use a new key."),
+
+            // S14-BE-01/02: CaptureBaselineCommand/ActivateBaselineCommand/CompareBaselineQuery.
+            [BaselineErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [BaselineErrorCodes.NotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+            [BaselineErrorCodes.NoActiveBaseline] = (StatusCodes.Status422UnprocessableEntity, "baseline-no-active-baseline", "This project has no active baseline to compare against. Capture and activate a baseline first."),
+            [BaselineErrorCodes.ActorRequired] = (StatusCodes.Status401Unauthorized, "baseline-actor-required", "The current request has no resolvable authenticated user."),
+            // S14-QA concurrent-activation-race fix: also reached when a genuine two-request race
+            // activates two different baselines for the same project at once (see
+            // IBaselineRepository.TryActivateAsync's remarks) - wording deliberately says "this
+            // project's active baseline", not "this baseline", since the loser's own target row was
+            // never itself touched by the other request; it is the project's active-baseline pointer
+            // that moved out from under it.
+            [BaselineErrorCodes.ConcurrencyConflict] = (StatusCodes.Status409Conflict, "concurrent-transition", "Another action has already changed this project's active baseline. Reload and try again."),
         };
 
     public static ProblemDetails ToProblemDetails(string errorCode, string instancePath)

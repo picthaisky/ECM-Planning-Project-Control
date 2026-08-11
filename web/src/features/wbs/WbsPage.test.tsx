@@ -1,4 +1,5 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import 'fake-indexeddb/auto'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -11,12 +12,25 @@ vi.mock('./api', async () => {
   const actual = await vi.importActual<typeof import('./api')>('./api')
   return {
     ...actual,
-    getWbsTree: vi.fn(),
+    getWbsTreeWithCacheInfo: vi.fn(),
     getNodeActivities: vi.fn(),
     batchRecordProgress: vi.fn(),
     recalculateCpm: vi.fn(),
   }
 })
+
+/** S13-FE-01: the batch-progress submit now enqueues into the real (fake-indexeddb-polyfilled)
+ * `cmplus-outbox` database before syncing — mirrors `features/photo/usePhotoOutbox.test.ts`'s
+ * identical reset helper, needed to isolate each test's outbox state under the fixed production
+ * database name. */
+function resetOutboxDatabase(): Promise<void> {
+  return new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase('cmplus-outbox')
+    request.onsuccess = () => resolve()
+    request.onerror = () => resolve()
+    request.onblocked = () => resolve()
+  })
+}
 
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 520 })
@@ -66,16 +80,22 @@ function renderPage(role: 'PM' | 'Executive') {
 }
 
 describe('WbsPage (S4-FE-03 integration)', () => {
-  beforeEach(() => {
-    vi.mocked(api.getWbsTree).mockReset()
+  beforeEach(async () => {
+    await resetOutboxDatabase()
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockReset()
     vi.mocked(api.getNodeActivities).mockReset()
     vi.mocked(api.batchRecordProgress).mockReset()
     vi.mocked(api.recalculateCpm).mockReset()
     useAuthStore.getState().logout()
   })
 
+  afterEach(async () => {
+    useAuthStore.getState().logout()
+    await resetOutboxDatabase()
+  })
+
   it('an allowed role (PM) sees the update-progress toggle; a disallowed role (Executive) does not', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValue({ tree: sampleTree, servedFromOfflineCache: false })
 
     renderPage('Executive')
     await waitFor(() => expect(screen.getByText('งานโครงสร้าง')).toBeInTheDocument())
@@ -86,7 +106,7 @@ describe('WbsPage (S4-FE-03 integration)', () => {
   })
 
   it('S5-FE-01: an allowed role (PM) can trigger a real CPM recalculation and sees the critical path preview in schedule order', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValue({ tree: sampleTree, servedFromOfflineCache: false })
     vi.mocked(api.recalculateCpm).mockResolvedValueOnce({
       activitiesProcessed: 4,
       criticalActivityCount: 3,
@@ -113,7 +133,7 @@ describe('WbsPage (S4-FE-03 integration)', () => {
   })
 
   it('S5-FE-01: a rejected recalculation (e.g. a detected relation cycle) shows a clear failure state, not a silent no-op', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValue({ tree: sampleTree, servedFromOfflineCache: false })
     vi.mocked(api.recalculateCpm).mockRejectedValueOnce(
       new api.WbsApiError(
         'พบการอ้างอิงกิจกรรมแบบวนซ้ำ (Cycle) ไม่สามารถคำนวณตารางเวลาได้ (เส้นทางวนซ้ำ: A → B → A)',
@@ -131,7 +151,7 @@ describe('WbsPage (S4-FE-03 integration)', () => {
   })
 
   it('full flow: enter update-progress mode, pick a node\'s activities, edit a value below current, confirm the decrease, and submit the real batch call', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValue({ tree: sampleTree, servedFromOfflineCache: false })
     vi.mocked(api.getNodeActivities).mockResolvedValueOnce(nodeActivities)
     vi.mocked(api.batchRecordProgress).mockResolvedValueOnce({ entriesRecorded: 1 })
     const user = userEvent.setup()
@@ -159,15 +179,19 @@ describe('WbsPage (S4-FE-03 integration)', () => {
     await user.click(screen.getByRole('button', { name: 'ยืนยันการปรับลด' }))
 
     await waitFor(() =>
-      expect(api.batchRecordProgress).toHaveBeenCalledWith('project-1', {
-        periodEndDate: '2026-07-27T00:00:00.000Z',
-        entries: [{ activityId: nodeActivities[0].id, progressPercentage: '20', actualQuantity: null }],
-      }),
+      expect(api.batchRecordProgress).toHaveBeenCalledWith(
+        'project-1',
+        {
+          periodEndDate: '2026-07-27T00:00:00.000Z',
+          entries: [{ activityId: nodeActivities[0].id, progressPercentage: '20', actualQuantity: null }],
+        },
+        expect.any(String),
+      ),
     )
   })
 
   it('the manual "+ เพิ่ม" add-row path works even when getNodeActivities 404s (no list endpoint yet)', async () => {
-    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.getWbsTreeWithCacheInfo).mockResolvedValue({ tree: sampleTree, servedFromOfflineCache: false })
     vi.mocked(api.getNodeActivities).mockRejectedValueOnce(new api.WbsApiError('ดำเนินการไม่สำเร็จ กรุณาลองใหม่อีกครั้ง', 404))
     const user = userEvent.setup()
 
