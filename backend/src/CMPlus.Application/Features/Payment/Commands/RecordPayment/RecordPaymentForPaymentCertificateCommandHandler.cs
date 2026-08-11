@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
 using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
@@ -29,7 +29,11 @@ public sealed class RecordPaymentForPaymentCertificateCommandHandler(
         }
 
         var now = clock.UtcNow;
-        var actorUserId = currentUser.UserId ?? Guid.Empty;
+        if (currentUser.UserId is not { } actorUserId)
+        {
+            return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.ActorRequired);
+        }
+
 
         // ApprovalPolicyId/Version are still the values the last successful chain pinned - Certified
         // never voids them (only ReturnForRevision/Withdraw do), so this is a real reference, not

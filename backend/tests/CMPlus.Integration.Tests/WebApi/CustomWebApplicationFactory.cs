@@ -27,6 +27,14 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     private readonly string _databaseName = Guid.NewGuid().ToString();
 
+    /// <summary>S12-BE-01: <see cref="Infrastructure.Storage.LocalDiskFileStorage"/> needs no
+    /// container/external service (plain local disk, ADR-0010's dev adapter), so photo upload/serve
+    /// tests can run for real end-to-end even without Docker - unlike the DB substitution above,
+    /// this is not a test double, it is the actual production adapter pointed at a throwaway,
+    /// per-factory-instance directory so parallel test runs cannot collide or leak into each other
+    /// (mirrors <see cref="_databaseName"/>'s identical per-instance-uniqueness rationale).</summary>
+    public string PhotoStorageRootPath { get; } = Path.Combine(Path.GetTempPath(), "cmplus-test-storage", Guid.NewGuid().ToString());
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureAppConfiguration((_, configBuilder) =>
@@ -37,6 +45,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["Jwt:Issuer"] = JwtIssuerForTests,
                 ["Jwt:Audience"] = JwtAudienceForTests,
                 ["Jwt:ExpiryMinutes"] = "60",
+                ["Storage:LocalRootPath"] = PhotoStorageRootPath,
             });
         });
 

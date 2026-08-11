@@ -99,11 +99,14 @@ public class ResultProblemMapperTests
     }
 
     [Fact]
-    public void DuplicateChainApprover_Maps_To_403()
+    public void DuplicateChainVoter_Maps_To_403()
     {
-        var problem = ResultProblemMapper.ToProblemDetails(PaymentApprovalErrorCodes.DuplicateChainApprover, "/api/v1/payment-certificates/1/approve");
+        // ADR-0016: renamed from DuplicateChainApprover ("duplicate-chain-approver") - widened from
+        // Approve-only to Approve-or-Reject.
+        var problem = ResultProblemMapper.ToProblemDetails(PaymentApprovalErrorCodes.DuplicateChainVoter, "/api/v1/payment-certificates/1/approve");
 
         Assert.Equal(403, problem.Status);
+        Assert.Equal("https://cmplus.dev/problems/duplicate-chain-voter", problem.Type);
     }
 
     // ------------------------------------------------------------------------------------

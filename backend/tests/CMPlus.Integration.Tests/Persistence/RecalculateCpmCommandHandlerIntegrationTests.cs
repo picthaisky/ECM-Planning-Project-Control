@@ -21,6 +21,18 @@ namespace CMPlus.Integration.Tests.Persistence;
 /// <c>CMPLUS_TEST_MSSQL_CONNECTION</c>/<c>ConnectionStrings__CmPlusDatabase</c> points at a real
 /// database (the same env vars that CI's <c>migration-smoke</c> job and this sprint's manual perf
 /// run both use) - a normal <c>dotnet test</c> run with no database reachable stays fast/hermetic.
+///
+/// <para><b>ADR-0019 extension:</b> also asserts the append-only <c>CpmRun</c>/<c>CpmRunActivity</c>/
+/// <c>CpmRunRelation</c> rows this same <see cref="RecalculateCpmCommandHandler"/> call now
+/// captures. Unlike the run-capture path itself (an ordinary tracked EF Core <c>Add</c>, chosen
+/// specifically so it does NOT require a real SQL Server - see
+/// <c>RecalculateCpmCommandHandlerCpmRunCaptureTests</c>, which exercises that half against the
+/// InMemory provider and is the one actually executed in this environment), this particular
+/// class-level assertion only runs when the soft-skip above does not fire. In this session no real
+/// SQL Server is reachable (Docker cannot start - docs/perf/gantt-frontend-s6.md §3), so this test
+/// was not executed; it is included for whenever CI/a real database is available and is believed
+/// correct by inspection and by reusing the already-proven Activity-write-back half of this same
+/// method, not by having been run.</para>
 /// </summary>
 public class RecalculateCpmCommandHandlerIntegrationTests
 {
@@ -113,7 +125,8 @@ public class RecalculateCpmCommandHandlerIntegrationTests
             await using var context = CreateContext(connectionString, tenantProvider, actorUserId, recalcTime);
             var repository = new CpmScheduleRepository(
                 context, tenantProvider, new FixedCurrentUserContext(actorUserId), new FixedDateTimeProvider(recalcTime));
-            var handler = new RecalculateCpmCommandHandler(repository);
+            var handler = new RecalculateCpmCommandHandler(
+                repository, tenantProvider, new FixedCurrentUserContext(actorUserId), new FixedDateTimeProvider(recalcTime));
 
             var result = await handler.Handle(new RecalculateCpmCommand(project.Id), CancellationToken.None);
 
@@ -145,11 +158,42 @@ public class RecalculateCpmCommandHandlerIntegrationTests
             Assert.Equal(0, reloaded["D"].FreeFloat);
 
             var auditLogCountAfterRecalc = await verify.AuditLogs.CountAsync();
-            // Exactly one new AuditLog row for the whole recalculation - not 4 (one per Activity) -
-            // proving SuppressPerEntityAudit really suppressed the interceptor's own default
-            // per-entity behaviour for the transaction's SaveChangesAsync call (the bulk Activity
-            // update itself is raw SQL and never touches the interceptor at all).
+            // Exactly one new AuditLog row for the whole recalculation - not 4 (one per Activity),
+            // and not 4 + 4 more for the CpmRunActivity/CpmRunRelation rows below - proving
+            // SuppressPerEntityAudit really suppressed the interceptor's own default per-entity
+            // behaviour for the transaction's SaveChangesAsync call (the bulk Activity update
+            // itself is raw SQL and never touches the interceptor at all).
             Assert.Equal(1, auditLogCountAfterRecalc - auditLogCountBeforeRecalc);
+
+            // ADR-0019: the append-only CpmRun captured in the SAME transaction as the Activity
+            // write-back and the audit row above - real SQL Server proof (not a fake) that
+            // SaveResultsAsync's ordinary tracked Add persists the whole CpmRun graph correctly,
+            // including its two owned child collections, and that this run is the one and only run
+            // for this project (this test's project is fresh per run - see the P-CPM-IT- prefix).
+            var run = await verify.CpmRuns
+                .Include(r => r.Activities)
+                .Include(r => r.Relations)
+                .AsNoTracking()
+                .SingleAsync(r => r.ProjectId == project.Id);
+
+            Assert.Equal(tenantId, run.TenantId);
+            Assert.Equal(recalcTime, run.CalculatedAt);
+            Assert.Equal(actorUserId, run.TriggeredByUserId);
+            Assert.Equal(CpmRunTrigger.Manual, run.Trigger);
+            Assert.Equal(15, run.ProjectDurationDays);
+            Assert.Equal(4, run.Activities.Count);
+            Assert.Equal(4, run.Relations.Count);
+
+            var runActivityA = Assert.Single(run.Activities, x => x.ActivityId == a.Id);
+            Assert.True(runActivityA.IsCritical);
+            Assert.Equal(0, runActivityA.TotalFloat);
+
+            var runActivityB = Assert.Single(run.Activities, x => x.ActivityId == b.Id);
+            Assert.False(runActivityB.IsCritical);
+            Assert.Equal(3, runActivityB.TotalFloat);
+            Assert.Equal(3, runActivityB.FreeFloat);
+
+            Assert.Contains(run.Relations, r => r.PredecessorActivityId == a.Id && r.SuccessorActivityId == b.Id && r.RelationType == RelationType.FS);
         }
     }
 }

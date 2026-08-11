@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
 using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
@@ -29,7 +29,11 @@ public sealed class ReturnPaymentCertificateForRevisionCommandHandler(
         }
 
         var actorRole = currentUser.Role;
-        var actorUserId = currentUser.UserId ?? Guid.Empty;
+        if (currentUser.UserId is not { } actorUserId)
+        {
+            return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.ActorRequired);
+        }
+
 
         // approval-workflow.md §4: "actor holds any pending step's role" - every step from
         // CurrentStepNo (inclusive) through TotalSteps, not only the current one. Once a step is

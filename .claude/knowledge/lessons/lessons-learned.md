@@ -98,3 +98,24 @@ DateTimeOffset` column and sort on that (with the id as a deterministic tie-brea
 Guid must be compared for ordering at all, do it client-side on the canonical hex form, never via
 SQL Server's `uniqueidentifier` collation. Applies to every entity in this codebase, since they all
 inherit `Entity`'s `Guid.CreateVersion7()` id.
+
+## 2026-08-10 — EF Core InMemory does not roll back a failed SaveChanges
+Context: Sprint 10's H-03 fix added a `rowversion` concurrency token to `Project`. Verifying it,
+`security-auditor` isolated a property of the test substitute that invalidates a whole class of
+assertion this repo relies on.
+What happened: when a `SaveChanges` fails with `DbUpdateConcurrencyException` under EF Core
+InMemory, **other entities staged in that same `SaveChanges` still persist**. Only the conflicting
+row is left alone. Concretely, the losing approver's `ApprovalAction` row survived a failed
+approval (2 → 3 rows), so a retry by that same approver then tripped `DuplicateChainVoter` and the
+document stranded — a failure mode that does not exist on SQL Server, where the implicit
+per-`SaveChanges` transaction rolls the whole batch back.
+Root cause: InMemory has no transaction support at all (`BeginTransactionAsync` throws outright),
+so there is nothing to roll back. This is an environment artifact, not a production defect.
+Rule: **Never assert "a failed transition wrote nothing" on the concurrency path under InMemory** —
+such a test is unsound in both directions: it can pass while production would differ, and it can
+fail while production is correct. Guard paths that return *before* staging anything remain sound,
+because nothing was staged. Any post-conflict state assertion must be deferred to a real SQL Server
+run and labelled as such. More generally: this is the second time InMemory's silence about a
+relational guarantee produced a false result (the first was unique indexes, which it ignores
+entirely — see the `ApprovalPolicy` filtered-index question). Treat "InMemory says it's fine" as
+evidence about the C# logic only, never about the storage engine's guarantees.

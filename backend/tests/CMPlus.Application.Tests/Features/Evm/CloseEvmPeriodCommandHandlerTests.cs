@@ -12,10 +12,20 @@ public class CloseEvmPeriodCommandHandlerTests
     private sealed class FakeEvmDataReader : IEvmDataReader
     {
         public ProjectEvmSettings? SettingsToReturn { get; set; }
+
+        /// <summary>Default matches this file's own former <c>ProjectEvmSettings.Bac</c> literal, now
+        /// resolved via the separate date-aware <see cref="GetBacAsOfAsync"/> reader call
+        /// (domain-rules.md §5.5(c)) rather than carried on the settings record. Overridden explicitly
+        /// (via <see cref="CreateHandler"/>'s <c>bac</c> parameter) by the one test that needs BAC = 0.</summary>
+        public decimal BacToReturn { get; set; } = 1_000_000.00m;
+
         public IReadOnlyList<EvmActivityProgressInput> ActivityInputsToReturn { get; set; } = [];
 
         public Task<ProjectEvmSettings?> GetProjectSettingsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
             Task.FromResult(SettingsToReturn);
+
+        public Task<decimal> GetBacAsOfAsync(Guid projectId, DateTimeOffset asOf, CancellationToken cancellationToken = default) =>
+            Task.FromResult(BacToReturn);
 
         public Task<IReadOnlyList<EvmActivityProgressInput>> GetActivityInputsAsync(
             Guid projectId, DateTimeOffset asOf, CancellationToken cancellationToken = default) =>
@@ -71,7 +81,6 @@ public class CloseEvmPeriodCommandHandlerTests
     }
 
     private static ProjectEvmSettings DefaultSettings(EacVariant defaultVariant = EacVariant.CpiBased) => new(
-        Bac: 1_000_000.00m,
         ProjectDataDate: DateTimeOffset.Parse("2026-06-30T00:00:00+07:00"),
         EacVariantDefault: defaultVariant,
         EacCustomPerformanceFactor: null,
@@ -84,9 +93,10 @@ public class CloseEvmPeriodCommandHandlerTests
         bool existsForDate = false,
         Guid? tenantId = null,
         Guid? userId = null,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        decimal bac = 1_000_000.00m)
     {
-        var dataReader = new FakeEvmDataReader { SettingsToReturn = settings, ActivityInputsToReturn = activityInputs ?? [] };
+        var dataReader = new FakeEvmDataReader { SettingsToReturn = settings, ActivityInputsToReturn = activityInputs ?? [], BacToReturn = bac };
         var costReader = new FakeActualCostReader(actualCost);
         var snapshotRepository = new FakeEvmSnapshotRepository { ExistsForDate = existsForDate };
         var computationService = new EvmComputationService(dataReader, costReader);
@@ -179,9 +189,10 @@ public class CloseEvmPeriodCommandHandlerTests
         // A not-started project (PV=EV=AC=0) - every variant is null, reason NotStarted. The
         // snapshot must freeze that honestly, never a fabricated 0.00.
         var (handler, repository) = CreateHandler(
-            DefaultSettings(defaultVariant: EacVariant.CpiBased) with { Bac = 0m },
+            DefaultSettings(defaultVariant: EacVariant.CpiBased),
             activityInputs: [],
-            actualCost: 0m);
+            actualCost: 0m,
+            bac: 0m);
 
         var result = await handler.Handle(
             new CloseEvmPeriodCommand(Guid.NewGuid(), DateTimeOffset.Parse("2026-06-30T00:00:00Z")), CancellationToken.None);

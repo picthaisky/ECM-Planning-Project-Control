@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import type { UserRole } from '../../store/authStore'
+import { canAttemptApprove, canAttemptReject, canAttemptReturnForRevision, resolveChainStepTone } from './chainPermissions'
 import { ApprovalChainBar } from './components/ApprovalChainBar'
 import { CertificatePanel } from './components/CertificatePanel'
 import { MilestoneCertificateTable } from './components/MilestoneCertificateTable'
 import { ProjectSettingsModal } from './components/ProjectSettingsModal'
+import { PAYMENT_STATUS_LABELS } from './paymentStatusLabels'
 import { useApprovalActions } from './useApprovalActions'
 import { usePaymentCertificateActions } from './usePaymentCertificateActions'
 import { usePaymentCertificates } from './usePaymentCertificates'
@@ -57,14 +59,21 @@ export function PaymentPage() {
 
         {certificates.selected && (
           <ApprovalChainBar
-            certificate={certificates.selected}
+            statusLabel={PAYMENT_STATUS_LABELS[certificates.selected.status]}
+            statusValue={certificates.selected.status}
+            totalSteps={certificates.selected.totalSteps}
+            currentStepNo={certificates.selected.currentStepNo}
+            notSubmittedYet={certificates.selected.status === 'NotDue' || certificates.selected.status === 'Draft'}
+            stepTone={(stepNo) => resolveChainStepTone(certificates.selected!, stepNo)}
             history={history.actions}
             historyState={history.state}
             historyUnavailableReason={history.unavailableReason}
-            currentUserId={currentUserId}
-            busyAction={actions.busyAction}
-            actionError={actions.actionError}
             quorumPendingNotice={actions.quorumPendingNotice}
+            canApprove={canAttemptApprove(certificates.selected, currentUserId)}
+            canReturnForRevision={canAttemptReturnForRevision(certificates.selected)}
+            canReject={canAttemptReject(certificates.selected)}
+            busy={actions.busyAction !== null}
+            actionError={actions.actionError}
             onApprove={actions.approve}
             onReturnForRevision={actions.returnForRevision}
             onReject={actions.reject}

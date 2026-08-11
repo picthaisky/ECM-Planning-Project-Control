@@ -21,6 +21,15 @@ public sealed class UpdateApprovalPolicyCommandValidator : AbstractValidator<Upd
             .InclusiveBetween(0m, 100m)
             .When(x => x.CumulativeVoEscalationPct.HasValue);
 
+        // domain-rules.md §4.6: a configured threshold with no role to escalate to would silently
+        // disable the control at runtime - reject at save, mirroring the Domain-level guard
+        // ApprovalPolicy's own constructor now enforces (defense-in-depth, same pairing as every
+        // other rule in this validator).
+        RuleFor(x => x.CumulativeVoEscalationRole)
+            .NotNull()
+            .When(x => x.CumulativeVoEscalationPct.HasValue)
+            .WithMessage("CumulativeVoEscalationRole is required whenever CumulativeVoEscalationPct is configured.");
+
         RuleFor(x => x.Rules).NotEmpty().WithMessage("An approval policy must define at least one rule.");
 
         RuleForEach(x => x.Rules).ChildRules(rule =>
@@ -29,8 +38,9 @@ public sealed class UpdateApprovalPolicyCommandValidator : AbstractValidator<Upd
             rule.RuleFor(r => r.MinAmount).GreaterThanOrEqualTo(0m);
             // Upper bound closes S9-SEC-02 finding N-02. Before H-02 was fixed an absurd
             // QuorumCount was inert because nothing read it; now that the engine genuinely enforces
-            // quorum, an over-large value is *binding* — and `DuplicateChainApprover` caps the
-            // achievable quorum at the number of distinct users holding that role, so e.g. 3 on a
+            // quorum, an over-large value is *binding* — and `DuplicateChainVoter` (ADR-0016; was
+            // `DuplicateChainApprover`) caps the achievable quorum at the number of distinct users
+            // holding that role, so e.g. 3 on a
             // role held by two people can never be satisfied. The certificate then sits in
             // PendingApproval permanently with its money fields frozen, and there is currently no
             // withdraw/cancel endpoint to recover it, so a careless (or malicious) tenant Admin can

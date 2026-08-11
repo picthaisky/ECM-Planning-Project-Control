@@ -9,15 +9,26 @@ namespace CMPlus.Infrastructure.Persistence;
 /// <summary>S5-BE-04: <see cref="ICpmScheduleRepository"/> against <see cref="CmPlusDbContext"/>.
 /// <see cref="LoadScheduleGraphAsync"/> mirrors <see cref="BatchProgressRepository"/>'s query shape
 /// (Sprint 3/4 precedent) for the <c>Activities</c> half; <see cref="SaveResultsAsync"/> deliberately
-/// does not follow that precedent for persistence (see the interface's remarks on why a
+/// does not follow that precedent for the Activity write-back (see the interface's remarks on why a
 /// change-tracked <c>SaveChangesAsync</c> over 10,000 entities measured too slowly to call "bulk").
 /// </summary>
 public sealed class CpmScheduleRepository(
     CmPlusDbContext dbContext, ITenantProvider tenantProvider, ICurrentUserContext currentUser, IDateTimeProvider clock)
     : ICpmScheduleRepository
 {
-    public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
-        dbContext.Projects.AsNoTracking().AnyAsync(p => p.Id == projectId, cancellationToken);
+    public async Task<CpmProjectContext?> GetProjectContextAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        // Single-row projection, same query shape/cost as the bare AnyAsync existence check this
+        // replaces (ADR-0019) - DataDate is non-nullable on Project itself, so a null result here
+        // means only one thing: no such project in this tenant (ADR-0002).
+        var dataDate = await dbContext.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (DateTimeOffset?)p.DataDate)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return dataDate is null ? null : new CpmProjectContext(dataDate.Value);
+    }
 
     public async Task<CpmScheduleGraph> LoadScheduleGraphAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
@@ -59,7 +70,7 @@ public sealed class CpmScheduleRepository(
     }
 
     public async Task SaveResultsAsync(
-        Guid projectId, IReadOnlyList<CpmActivityWriteBack> results, CancellationToken cancellationToken = default)
+        Guid projectId, IReadOnlyList<CpmActivityWriteBack> results, CpmRun run, CancellationToken cancellationToken = default)
     {
         // Real measurement against the S4-DB-02 10,000-activity/15,000-relation dataset: routing
         // this through EF Core's ordinary change-tracked SaveChangesAsync() (10,000 modified
@@ -104,18 +115,30 @@ public sealed class CpmScheduleRepository(
 
             // The Activity instances LoadScheduleGraphAsync returned are still tracked and were
             // mutated in-memory (Activity.SetCpmResults) by the caller before this ran - clear the
-            // tracker now so the SaveChangesAsync below (for the one AuditLog row) does not ALSO
-            // try to persist those same rows a second time via individual UPDATE statements,
-            // silently doubling the very cost this method exists to avoid.
+            // tracker now so the SaveChangesAsync below does not ALSO try to persist those same rows
+            // a second time via individual UPDATE statements, silently doubling the very cost this
+            // method exists to avoid. This MUST happen before `run` is added below, or Clear() would
+            // detach the run graph too and it would never be saved.
             dbContext.ChangeTracker.Clear();
         }
+
+        // ADR-0019: the append-only CpmRun history, captured in the SAME transaction as the Activity
+        // write-back above so a run is never persisted without the Activity state it was computed
+        // from (or vice versa) - if either half fails, both roll back together. Ordinary tracked Add
+        // (cascades CpmRun.Activities/Relations via the owned-collection navigations) rather than
+        // the raw-SQL OPENJSON technique the UPDATE above uses - see ICpmScheduleRepository's remarks
+        // on why (chiefly: this keeps run capture exercisable by an EF Core InMemory-backed
+        // integration test, which ExecuteSqlInterpolatedAsync cannot be at all).
+        dbContext.CpmRuns.Add(run);
 
         dbContext.SuppressPerEntityAudit = true;
         try
         {
             // One summarizing AuditLog row for the whole recalculation (S5-BE-04 DoD), anchored on
             // the Project - same rationale as BatchProgressRepository.SaveBatchAsync ("which
-            // project changed" is the discovery axis a PM/Planning role actually queries by).
+            // project changed" is the discovery axis a PM/Planning role actually queries by). Also
+            // names the captured CpmRunId (ADR-0019) so the audit trail cross-references the run
+            // without needing a second row.
             dbContext.AuditLogs.Add(new AuditLog(
                 tenantProvider.TenantId, nameof(Project), projectId, AuditAction.Updated, currentUser.UserId,
                 beforeJson: null,
@@ -123,9 +146,14 @@ public sealed class CpmScheduleRepository(
                 {
                     ProjectId = projectId,
                     ActivitiesRecalculated = results.Count,
+                    CpmRunId = run.Id,
                 }),
                 clock.UtcNow));
 
+            // Persists both the CpmRun graph (Added, tracked above) and the one AuditLog row - the
+            // SuppressPerEntityAudit escape hatch means AuditSaveChangesInterceptor does not also
+            // add one AuditLog row per CpmRunActivity/CpmRunRelation (which at 10,000/15,000 scale
+            // would be 25,000+ extra rows on top of the one intended above).
             await dbContext.SaveChangesAsync(cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }

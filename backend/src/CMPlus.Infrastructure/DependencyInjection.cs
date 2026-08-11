@@ -6,6 +6,8 @@ using CMPlus.Infrastructure.Parsers.Mspdi;
 using CMPlus.Infrastructure.Parsers.Xer;
 using CMPlus.Infrastructure.Persistence;
 using CMPlus.Infrastructure.Persistence.Interceptors;
+using CMPlus.Infrastructure.Photos;
+using CMPlus.Infrastructure.Storage;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -56,6 +58,10 @@ public static class DependencyInjection
         // S5-BE-04: CPM schedule graph load + bulk result write-back.
         services.AddScoped<ICpmScheduleRepository, CpmScheduleRepository>();
 
+        // ADR-0019: read side of the append-only CpmRun history - the governing-run lookup
+        // S11-BE-02's EotEvaluator will consume.
+        services.AddScoped<ICpmRunHistoryReader, CpmRunHistoryReader>();
+
         // S6-BE-01: Gantt activity-bar read (the WBS hierarchy read it also needs is IWbsTreeReader
         // above, reused rather than duplicated).
         services.AddScoped<IGanttActivityReader, GanttActivityReader>();
@@ -85,6 +91,34 @@ public static class DependencyInjection
         services.AddScoped<IPaymentCertificateRepository, PaymentCertificateRepository>();
         services.AddScoped<IApprovalActionRepository, ApprovalActionRepository>();
         services.AddScoped<IApprovalPolicyRepository, ApprovalPolicyRepository>();
+
+        // S10-BE-01/02/03: VariationOrder approval-chain command handlers - reuses the Sprint 2/9
+        // ApprovalPolicy/ApprovalAction/RowVersion machinery unchanged.
+        services.AddScoped<IVariationOrderRepository, VariationOrderRepository>();
+
+        // S11-BE-01/03: immutable DailyWeatherLog (IAppendOnly, guarded by AppendOnlyGuardInterceptor
+        // registered above) and the IssueLog Open->Doing->Closed state machine.
+        services.AddScoped<IDailyWeatherLogRepository, DailyWeatherLogRepository>();
+        services.AddScoped<IIssueLogRepository, IssueLogRepository>();
+
+        // S11-BE-02: EotEvaluator's persistence boundary - project calendar/policy/activity context
+        // reads plus the append-only EotEvaluation write (IAppendOnly, guarded by
+        // AppendOnlyGuardInterceptor registered above).
+        services.AddScoped<IEotEvaluationRepository, EotEvaluationRepository>();
+
+        // S12-BE-01 (US-12.1): photo upload/serve. IFileStorage is the ADR-0010 seam - this is the
+        // local-disk dev/staging adapter; no cloud-provider SDK type appears anywhere on this path
+        // (Architecture.Tests enforces this structurally).
+        services.AddOptions<FileStorageOptions>().Bind(configuration.GetSection(FileStorageOptions.SectionName));
+        services.AddSingleton<IFileStorage, LocalDiskFileStorage>();
+        services.AddOptions<PhotoOptions>().Bind(configuration.GetSection(PhotoOptions.SectionName));
+        services.AddSingleton<IPhotoOptionsProvider, PhotoOptionsProvider>();
+        services.AddScoped<IPhotoRepository, PhotoRepository>();
+
+        // S12-BE-02 (US-12.2): append-only ManpowerEquipmentLog (IAppendOnly, guarded by
+        // AppendOnlyGuardInterceptor registered above) and the Productivity Index read side.
+        services.AddScoped<IManpowerEquipmentLogRepository, ManpowerEquipmentLogRepository>();
+        services.AddScoped<IProductivityIndexReader, ProductivityIndexReader>();
 
         services.AddSingleton<IDateTimeProvider, SystemDateTimeProvider>();
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();

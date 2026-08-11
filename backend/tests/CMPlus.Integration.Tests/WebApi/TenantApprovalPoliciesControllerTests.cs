@@ -64,6 +64,13 @@ public class TenantApprovalPoliciesControllerTests : IClassFixture<CustomWebAppl
         Assert.NotNull(policy);
         Assert.Equal(1, policy!.Version);
         Assert.True(policy.IsActive);
+        // ADR-0015 (human-confirmed 2026-08-10: "Threshold default 10.00%") / sprint-10 security
+        // review M-03: CumulativeVoEscalationPct is seeded 10.00, not NULL. domain-rules.md §4.5's
+        // "PENDING - no default set" predates the human's answer and is superseded by the ADR.
+        // Seeding NULL past that point left cumulative-VO escalation switched OFF in every tenant with
+        // no signal distinguishing "deliberately disabled" from "provisioning never turned it on" -
+        // execution-verified in the review: a project 41.9% varied approved another VO with no
+        // Executive signature anywhere.
         Assert.Equal(10.00m, policy.CumulativeVoEscalationPct);
         Assert.Equal("Executive", policy.CumulativeVoEscalationRole);
         Assert.Equal(6, policy.Rules.Count);

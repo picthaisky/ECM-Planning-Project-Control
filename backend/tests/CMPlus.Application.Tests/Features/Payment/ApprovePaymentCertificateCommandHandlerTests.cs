@@ -1,4 +1,4 @@
-using CMPlus.Application.Features.Payment.Commands.Approve;
+﻿using CMPlus.Application.Features.Payment.Commands.Approve;
 using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
 
@@ -34,7 +34,7 @@ public class ApprovePaymentCertificateCommandHandlerTests
         Guid TenantId);
 
     private static (Fixture Fixture, ApprovePaymentCertificateCommandHandler Handler) CreateHandler(
-        Fixture? existing, Guid actorUserId, UserRole actorRole)
+        Fixture? existing, Guid? actorUserId, UserRole actorRole)
     {
         var fixture = existing ?? new Fixture(
             new FakePaymentCertificateRepository(), new FakeApprovalActionRepository(), Guid.NewGuid());
@@ -192,7 +192,43 @@ public class ApprovePaymentCertificateCommandHandlerTests
         var secondApproval = await handler2.Handle(new ApprovePaymentCertificateCommand(certificate.Id, null), CancellationToken.None);
 
         Assert.True(secondApproval.IsFailure);
-        Assert.Equal("PaymentCertificateDuplicateChainApprover", secondApproval.Error);
+        Assert.Equal("PaymentCertificateDuplicateChainVoter", secondApproval.Error);
+    }
+
+    [Fact]
+    public async Task Handle_Blocks_An_Actor_Who_Already_Cast_A_Non_Terminal_Reject_This_Revision_From_Then_Approving_ADR_0016()
+    {
+        // ADR-0016 / domain-rules.md §8.3 (V-11a, inverted): DuplicateChainVoter widens
+        // DuplicateChainApprover to Action ∈ {Approve, Reject} - an actor who already rejected this
+        // revision may not later approve, even the SAME step. QuorumCount=2 on a single-step chain
+        // is deliberate: it is the only shape where a Reject vote is both legal (final step) AND
+        // non-terminal (quorum not yet reached), so there is a "later" for the same actor to attempt
+        // an Approve at all - with QuorumCount=1 the Reject would already be terminal.
+        var tenantId = Guid.NewGuid();
+        IReadOnlyList<PaymentCertificateApprovalStepInput> quorumTwoFinalStep = [new(1, UserRole.QS, QuorumCount: 2)];
+        var fixtureBase = new Fixture(new FakePaymentCertificateRepository(), new FakeApprovalActionRepository(), tenantId);
+        var actorId = Guid.NewGuid();
+        var certificate = SubmittedCertificate(tenantId, Guid.NewGuid(), quorumTwoFinalStep, Guid.NewGuid(), 1, Guid.NewGuid(), Guid.NewGuid());
+        fixtureBase.Repository.Seed(certificate);
+
+        var rejectHandler = new CMPlus.Application.Features.Payment.Commands.Reject.RejectPaymentCertificateCommandHandler(
+            fixtureBase.Repository,
+            fixtureBase.ActionRepository,
+            new FakeTenantProviderForPayment(tenantId),
+            new FakeCurrentUserContextForPayment(actorId, UserRole.QS),
+            new FakeClockForPayment(Now));
+        var rejectResult = await rejectHandler.Handle(
+            new CMPlus.Application.Features.Payment.Commands.Reject.RejectPaymentCertificateCommand(certificate.Id, "Not acceptable."),
+            CancellationToken.None);
+        Assert.True(rejectResult.IsSuccess);
+        Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status); // 1 of 2 rejectors - not yet terminal
+
+        var (_, approveHandler) = CreateHandler(fixtureBase, actorId, UserRole.QS);
+        var approveResult = await approveHandler.Handle(new ApprovePaymentCertificateCommand(certificate.Id, null), CancellationToken.None);
+
+        Assert.True(approveResult.IsFailure);
+        Assert.Equal("PaymentCertificateDuplicateChainVoter", approveResult.Error);
+        Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status); // still unresolved, not silently advanced
     }
 
     [Fact]
@@ -341,11 +377,11 @@ public class ApprovePaymentCertificateCommandHandlerTests
     }
 
     [Fact]
-    public async Task Handle_A_QuorumCount_Two_Step_Reconciles_With_DuplicateChainApprover_The_Same_Actor_Cannot_Vote_Twice()
+    public async Task Handle_A_QuorumCount_Two_Step_Reconciles_With_DuplicateChainVoter_The_Same_Actor_Cannot_Vote_Twice()
     {
         // security review sprint-09.md H-02 fix guidance: reconciling quorum with the pre-existing
-        // DuplicateChainApprover rule - a single actor's second Approve call must still be refused by
-        // DuplicateChainApprover, not silently counted as a second, distinct quorum vote.
+        // DuplicateChainVoter rule (ADR-0016; was DuplicateChainApprover) - a single actor's second
+        // Approve call must still be refused, not silently counted as a second, distinct quorum vote.
         var tenantId = Guid.NewGuid();
         var fixtureBase = new Fixture(new FakePaymentCertificateRepository(), new FakeApprovalActionRepository(), tenantId);
         IReadOnlyList<PaymentCertificateApprovalStepInput> quorumTwoStep = [new(1, UserRole.QS, QuorumCount: 2)];
@@ -361,7 +397,7 @@ public class ApprovePaymentCertificateCommandHandlerTests
         var second = await handler2.Handle(new ApprovePaymentCertificateCommand(certificate.Id, null), CancellationToken.None);
 
         Assert.True(second.IsFailure);
-        Assert.Equal("PaymentCertificateDuplicateChainApprover", second.Error);
+        Assert.Equal("PaymentCertificateDuplicateChainVoter", second.Error);
         Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status); // still waiting on a distinct second approver
     }
 
@@ -392,5 +428,31 @@ public class ApprovePaymentCertificateCommandHandlerTests
         var afterSecondPm = await pmHandler2.Handle(new ApprovePaymentCertificateCommand(certificate.Id, null), CancellationToken.None);
         Assert.True(afterSecondPm.IsSuccess);
         Assert.Equal(PaymentCertificateStatus.Certified, afterSecondPm.Value.Status);
+    }
+
+    /// <summary>
+    /// S9 finding L-01, widened in Sprint 11. Unreachable behind <c>[Authorize]</c> today, but the
+    /// old <c>currentUser.UserId ?? Guid.Empty</c> would have attributed a payment certification —
+    /// an append-only legal-evidence row — to nobody. It also silently defeated the self-approval
+    /// guard, since a real submitter id can never equal <c>Guid.Empty</c>, so the comparison could
+    /// not match. Fail closed instead, and never write the ApprovalAction.
+    /// </summary>
+    [Fact]
+    public async Task Handle_Fails_Closed_When_No_Authenticated_User_Can_Be_Resolved()
+    {
+        var tenantId = Guid.NewGuid();
+        var fixtureBase = new Fixture(new FakePaymentCertificateRepository(), new FakeApprovalActionRepository(), tenantId);
+        var certificate = SubmittedCertificate(tenantId, Guid.NewGuid(), ThreeStepChain(), Guid.NewGuid(), 1, Guid.NewGuid(), Guid.NewGuid());
+        fixtureBase.Repository.Seed(certificate);
+        var (fixture, handler) = CreateHandler(fixtureBase, actorUserId: null, actorRole: UserRole.QS);
+
+        var result = await handler.Handle(
+            new ApprovePaymentCertificateCommand(certificate.Id, null), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal("PaymentCertificateActorRequired", result.Error);
+        // The guard must run before anything is written - no evidence row for a nobody actor.
+        Assert.Empty(fixture.ActionRepository.Actions);
+        Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status);
     }
 }

@@ -80,6 +80,17 @@ public sealed class ApprovalPolicy : Entity, ITenantOwned
             throw new DomainException("ApprovalPolicy.CumulativeVoEscalationPct must be between 0 and 100 when supplied.");
         }
 
+        // domain-rules.md §4.6: "r = NULL while theta != NULL -> Policy configuration error - reject
+        // at policy save ... Do not silently disable the escalation at runtime." Checked here (not
+        // only in UpdateApprovalPolicyCommandValidator) so no future caller of CreateInitialVersion/
+        // CreateNextVersion - including ApprovalPolicySeeder - can construct this contradiction either.
+        if (cumulativeVoEscalationPct is not null && cumulativeVoEscalationRole is null)
+        {
+            throw new DomainException(
+                "ApprovalPolicy.CumulativeVoEscalationRole is required whenever CumulativeVoEscalationPct is configured " +
+                "- an escalation threshold with no role to escalate to would silently disable the control at runtime.");
+        }
+
         ValidateBands(rules);
 
         TenantId = tenantId;

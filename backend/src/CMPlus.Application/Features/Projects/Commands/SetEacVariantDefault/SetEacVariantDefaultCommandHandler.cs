@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
 using MediatR;
 
@@ -23,7 +23,11 @@ public sealed class SetEacVariantDefaultCommandHandler(IProjectRepository reposi
         // (ADR-0007(f): "changing EacVariantDefault is a mutating domain operation -> audit log
         // entry"), the same pattern UpdateProjectCommandHandler already established - no bespoke
         // audit code needed.
-        await repository.SaveChangesAsync(cancellationToken);
+        if (!await repository.TrySaveChangesAsync(cancellationToken))
+        {
+            return Result<SetEacVariantDefaultResultDto>.Failure(ProjectErrorCodes.ConcurrencyConflict);
+        }
+
 
         return Result<SetEacVariantDefaultResultDto>.Success(
             new SetEacVariantDefaultResultDto(project.Id, project.EacVariantDefault));

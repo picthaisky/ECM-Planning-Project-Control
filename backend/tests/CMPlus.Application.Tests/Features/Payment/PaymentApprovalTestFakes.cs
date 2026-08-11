@@ -100,7 +100,15 @@ internal sealed class FakeTenantProviderForPayment(Guid tenantId) : ITenantProvi
     public Guid TenantId { get; } = tenantId;
 }
 
-internal sealed class FakeCurrentUserContextForPayment(Guid userId, UserRole role) : ICurrentUserContext
+/// <summary>
+/// <paramref name="userId"/> is deliberately <see cref="Nullable{T}"/> (widened from a plain
+/// <c>Guid</c> - every existing call site passes a concrete <c>Guid</c>, which converts implicitly,
+/// so this is source-compatible with all of them) so sprint-10 security review L-01's "fail closed on
+/// a null actor" guards are actually testable: <c>new FakeCurrentUserContextForPayment(null, role)</c>
+/// reproduces <c>ICurrentUserContext.UserId is null</c>, the one case none of this codebase's tests
+/// exercised before this fix.
+/// </summary>
+internal sealed class FakeCurrentUserContextForPayment(Guid? userId, UserRole role) : ICurrentUserContext
 {
     public Guid? UserId { get; } = userId;
 

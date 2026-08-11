@@ -688,3 +688,41 @@ applies in full, and now additionally covers the new table's CHECK constraints, 
 (the mechanism `VoidChainSnapshot` relies on — verified only under InMemory's orphan-delete
 semantics), and N-03's concurrency behaviour. ADR-0008 requires this review again before Sprint 10
 closes; N-01 through N-05 should be scheduled into that pass.
+
+---
+
+## 10. Status of the §9 follow-up findings (implementer-reported — pending `security-auditor` re-verification)
+
+Recorded 2026-08-09 by the orchestrator so §9's findings do not read as open when they are not.
+Everything below is **implementer-reported and orchestrator-verified at the build/test level only** —
+`security-auditor` has **not** re-probed these the way it probed H-01/H-02, so none of them should be
+treated as auditor-closed. Suite at time of writing: build 0 warnings, **894/894**.
+
+| ID | Severity | Status |
+| :-- | :-- | :-- |
+| N-01 | Medium | **Fixed.** New `INeverModified` marker + interceptor branch blocks `Modified` on `PaymentCertificateApprovalStep` while leaving `Added`/`Deleted` legal, so `ReturnForRevision`'s clear-and-rebuild still works. Both halves tested. |
+| N-02 | Medium | **Partially fixed.** `QuorumCount` now bounded 1–5 in `UpdateApprovalPolicyCommandValidator` with a message stating the consequence, backed by 8 tests. **Still open:** nothing prevents a quorum larger than the number of users actually holding that role, and `Withdraw`/`Cancel` remain unexposed by any controller — so a stranded certificate still has no recovery path. |
+| N-03 | Low → **was under-rated** | **Fixed.** The review recorded this as "not reproducible under InMemory, stated as inference"; `qa-engineer` disproved that and reproduced it deterministically with two `DbContext`s (no threads needed) — both voters co-committed and the step stuck permanently with both actors locked out by `DuplicateChainApprover`. Fixed with an unconditional `LastVoteAt` stamp so a non-advancing vote still marks the aggregate `Modified` and `rowversion` serialises voters. The pre-existing pin test was flipped to assert correct behaviour and mutation-verified. New migration `20260809121505_Sprint9_PaymentCertificate_LastVoteAt` (**unapplied** — no SQL Server). |
+| N-04 | Low | **Open.** Snapshot natural-key index still non-unique. |
+| N-05 | Low | **Open.** Needs a `domain-expert` ruling before Sprint 10 applies the same shape to VOs. |
+| M-01 | Medium | **Now fully fixed.** §9.4 correctly reported the money-freeze half was never built, and `qa-engineer` re-confirmed live that a `Certified` certificate's `NetPayment` was still rewritable through a raw `DbContext`. The interceptor now rejects modification of the five money fields once `Status` leaves `NotDue`/`Draft`, keyed on per-property `IsModified` so lifecycle transitions stay legal. Mutation-verified, with explicit happy-path coverage. |
+| M-02 | Medium | **Open — needs a product decision, not a code fix.** Partially mitigated only: the new list endpoint is project-scoped by route. The id-scoped mutating actions are unchanged, and no project-membership concept exists in the model. |
+
+### Verification-quality note
+
+`qa-engineer`'s independent pass (S9-QA-01/02/03) used canary mutation rather than re-running the
+suite, and found two places where green tests protected nothing: deleting
+`AdvanceRecoveryCalculator`'s `ThresholdEndPct` branch left all 24 tests passing (P6's parameters
+make the branch unobservable), and R9's chain-clearing had no Domain-layer coverage at all. Both are
+now closed. This is the second and third time this sprint that a fully green suite sat on top of a
+real defect — the first being H-01, which 822 tests passed straight over. Mutation testing, not pass
+counts, is what has actually caught things here.
+
+### Still unverifiable without a running database
+
+Unchanged from §7 and §9.6, plus: the two new migrations
+(`..._PaymentCertificateApprovalStep`, `..._PaymentCertificate_LastVoteAt`) are unapplied; and EF
+Core InMemory supports no transactions at all, so while N-03's core guarantee (the certificate row
+cannot silently co-commit) is proven, the "loser's `ApprovalAction` rolls back with its failed
+update" property is not — on a relational provider EF wraps each `SaveChanges` in an implicit
+transaction, but that is reasoning, not an executed result.

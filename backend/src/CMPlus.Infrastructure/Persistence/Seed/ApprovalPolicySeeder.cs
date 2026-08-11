@@ -17,10 +17,10 @@ namespace CMPlus.Infrastructure.Persistence.Seed;
 public static class ApprovalPolicySeeder
 {
     /// <summary>
-    /// approval-workflow.md §8: cumulative-VO escalation appends <see cref="UserRole.Executive"/>
-    /// once approved VO / ContractValue exceeds 10%. <see cref="ApprovalPolicy.ProjectId"/> is
-    /// left null (tenant-wide default) - project-scoped overrides are a Sprint 15 surface
-    /// (ADR-0008 consequences).
+    /// approval-workflow.md §8 / ADR-0015: cumulative-VO escalation, when configured, appends
+    /// <see cref="UserRole.Executive"/> once approved-VO drift exceeds the tenant's chosen threshold.
+    /// <see cref="ApprovalPolicy.ProjectId"/> is left null (tenant-wide default) - project-scoped
+    /// overrides are a Sprint 15 surface (ADR-0008 consequences).
     /// </summary>
     private static readonly IReadOnlyList<ApprovalPolicyRuleInput> VoRules =
     [
@@ -44,6 +44,14 @@ public static class ApprovalPolicySeeder
     public static async Task SeedDefaultPoliciesAsync(
         CmPlusDbContext dbContext, Guid tenantId, DateTimeOffset effectiveFrom, CancellationToken cancellationToken = default)
     {
+        // ADR-0015 (human-confirmed 2026-08-10: "Threshold default 10.00%") / sprint-10 security
+        // review M-03: seed 10.00, not NULL. domain-rules.md §4.5 still reads "PENDING - no default
+        // set" because it predates the human's answer; the ADR is the later, authoritative source and
+        // wins per this codebase's ADR-precedence rule. Shipping NULL here left cumulative-VO
+        // escalation switched OFF in every tenant with no signal distinguishing "deliberately
+        // disabled" from "provisioning never turned it on" - execution-verified in the review: a
+        // project 41.9% varied approved another VO with no Executive signature anywhere.
+        // CumulativeVoEscalationRole stays Executive, as it already was.
         await GetOrCreateAsync(
             dbContext, tenantId, ApprovalDocumentType.VariationOrder, effectiveFrom,
             VoRules, cumulativeVoEscalationPct: 10.00m, cumulativeVoEscalationRole: UserRole.Executive,

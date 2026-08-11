@@ -154,8 +154,9 @@ public class PaymentCertificateChainSnapshotSecurityTests
     }
 
     /// <summary>Same user cannot cast a second vote toward their own step's quorum - reconciles
-    /// quorum enforcement with the pre-existing DuplicateChainApprover rule (sprint-09.md H-02 fix
-    /// guidance: "this must be reconciled with the existing DuplicateChainApprover check").</summary>
+    /// quorum enforcement with the pre-existing DuplicateChainVoter rule (ADR-0016; was
+    /// DuplicateChainApprover - sprint-09.md H-02 fix guidance: "this must be reconciled with the
+    /// existing DuplicateChainApprover check").</summary>
     [Fact]
     public async Task H02_The_Same_User_Cannot_Cast_A_Second_Vote_Toward_Their_Own_Steps_Quorum()
     {
@@ -174,7 +175,7 @@ public class PaymentCertificateChainSnapshotSecurityTests
         var secondAttemptSameUser = await harness.ApproveAsync(certificateId, qsUserId, UserRole.QS);
 
         Assert.True(secondAttemptSameUser.IsFailure);
-        Assert.Equal("PaymentCertificateDuplicateChainApprover", secondAttemptSameUser.Error);
+        Assert.Equal("PaymentCertificateDuplicateChainVoter", secondAttemptSameUser.Error);
         var certificate = await harness.LoadCertificateAsync(certificateId);
         Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status); // still waiting
     }

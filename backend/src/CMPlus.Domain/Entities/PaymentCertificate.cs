@@ -27,8 +27,17 @@ namespace CMPlus.Domain.Entities;
 /// optimistic-concurrency token (design.md §3, <c>PaymentCertificateConfiguration</c>). Two
 /// simultaneous approvers loading the same row and both calling <see cref="Approve"/> will both
 /// succeed in memory, but the second <c>SaveChanges</c> throws <c>DbUpdateConcurrencyException</c> -
-/// which the (not-yet-built, S9-BE-05) command handler maps to <c>409 Conflict</c> - never a
-/// double-advance through the chain.</para>
+/// which the S9-BE-05 command handler maps to <c>409 Conflict</c> - never a double-advance through
+/// the chain. <b>N-03 fix (security review sprint-09.md §9.5):</b> this only works when
+/// <see cref="Approve"/> actually leaves the aggregate <c>Modified</c> - a non-advancing quorum vote
+/// used to return having touched nothing at all, so EF's change tracker saw <c>Unchanged</c>, issued
+/// no UPDATE, and gave <see cref="RowVersion"/> nothing to disagree about. Two concurrent "first"
+/// voters on a <c>QuorumCount &gt;= 2</c> step could therefore both load-then-decide from the same
+/// stale zero-prior-approvers history and both silently co-commit, permanently stranding the step
+/// (each had already voted once, so the distinct-approver guard then blocks either from voting
+/// again). <see cref="LastVoteAt"/> exists to close exactly this gap: every accepted vote stamps it,
+/// advancing or not, so the row is always <c>Modified</c> and the second concurrent
+/// <c>SaveChanges</c> now races against the first exactly like every other transition.</para>
 ///
 /// <para><b>Approval chain (resolved scope boundary, revised by the security review sprint-09.md
 /// H-01 fix):</b> this aggregate snapshots the fully-resolved per-step role/quorum chain onto itself
@@ -117,6 +126,15 @@ public sealed class PaymentCertificate : Entity, ITenantOwned
     /// chain is attached (mirrors the fail-closed/restrictive default of the no-policy-configured
     /// fallback chain, approval-workflow.md §5.3 step 6).</summary>
     public bool AllowSelfApproval { get; private set; }
+
+    /// <summary>Stamped by every accepted <see cref="Approve"/> vote - advancing or not (N-03 fix,
+    /// security review sprint-09.md §9.5). Exists purely so a non-advancing quorum vote still dirties
+    /// this aggregate for EF Core's change tracker, giving <see cref="RowVersion"/> something to
+    /// disagree about when two voters race to be "first" on the same step - see this type's own
+    /// <b>Concurrency</b> remarks above. Not itself read by any business rule; voided along with the
+    /// rest of the in-progress chain state by <see cref="VoidChainSnapshot"/> so it never carries a
+    /// stale value into the next revision's chain.</summary>
+    public DateTimeOffset? LastVoteAt { get; private set; }
 
     /// <summary>The resolved approval chain for the current (or most recently voided) revision,
     /// snapshotted at <see cref="Submit"/> time - see <see cref="PaymentCertificateApprovalStep"/>'s
@@ -294,8 +312,9 @@ public sealed class PaymentCertificate : Entity, ITenantOwned
     /// already voted for <see cref="CurrentStepNo"/> on this <see cref="RevisionNo"/>, reaches the
     /// step's <c>QuorumCount</c>. When <see langword="false"/>, the vote is accepted (the guard
     /// checks above still run, and the caller is expected to still record an <c>ApprovalAction</c>
-    /// row for it) but the certificate's state does not change - it stays <c>PendingApproval</c> at
-    /// the same <see cref="CurrentStepNo"/>, awaiting more distinct approvers. Defaults to
+    /// row for it), and (N-03 fix) <see cref="LastVoteAt"/> is still stamped, but the certificate's
+    /// <em>workflow</em> state does not change - it stays <c>PendingApproval</c> at the same
+    /// <see cref="CurrentStepNo"/>, awaiting more distinct approvers. Defaults to
     /// <see langword="true"/> (quorum of one, the overwhelmingly common case and every step's
     /// default <c>QuorumCount</c>) so existing single-signature call sites are unaffected.</param>
     public void Approve(
@@ -322,11 +341,22 @@ public sealed class PaymentCertificate : Entity, ITenantOwned
                 $"Actor role {actorRole} does not hold the required role {expectedStepRole} for step {CurrentStepNo}.");
         }
 
+        // N-03 fix (security review sprint-09.md §9.5): stamped unconditionally, BEFORE the
+        // quorumSatisfied branch, so every accepted vote - advancing or not - leaves this aggregate
+        // Modified. Without this, a non-advancing vote returned having assigned nothing at all, so
+        // EF's change tracker saw Unchanged, issued no UPDATE, and RowVersion (the optimistic-
+        // concurrency token every other transition relies on) never moved - an unprotected
+        // read-then-write that let two concurrent "first" voters on the same QuorumCount >= 2 step
+        // both silently co-commit instead of the second one racing and losing. See this type's
+        // Concurrency remarks and LastVoteAt's own doc comment for the full picture.
+        LastVoteAt = actedAt;
+
         if (!quorumSatisfied)
         {
             // Vote recorded (by the caller, as an ApprovalAction) but this step's QuorumCount has not
-            // yet been reached by enough distinct approvers (approval-workflow.md §6.2) - no state
-            // change, still PendingApproval at the same CurrentStepNo.
+            // yet been reached by enough distinct approvers (approval-workflow.md §6.2) - no further
+            // workflow state change, still PendingApproval at the same CurrentStepNo. LastVoteAt above
+            // has already made sure this is not a silent no-op as far as EF/RowVersion are concerned.
             return;
         }
 
@@ -361,8 +391,27 @@ public sealed class PaymentCertificate : Entity, ITenantOwned
 
     /// <summary><c>[PendingApproval] --Reject--&gt; [Rejected]</c> (terminal): only the final step's
     /// approver may reject (approval-workflow.md §4/§6.1) - intermediate approvers may only
-    /// <see cref="ReturnForRevision"/>.</summary>
-    public void Reject(UserRole actorRole, UserRole expectedFinalStepRole)
+    /// <see cref="ReturnForRevision"/>. <b>ADR-0016 / domain-rules.md §8 ("quorum binds rejection"):</b>
+    /// this now mirrors <see cref="Approve"/>'s quorum shape exactly - a step configured with
+    /// <c>QuorumCount = q</c> reaches the terminal <see cref="PaymentCertificateStatus.Rejected"/>
+    /// state only once <paramref name="rejectQuorumSatisfied"/> reflects that q distinct role-holders
+    /// have rejected THIS step (the caller counts them from the append-only <c>ApprovalAction</c>
+    /// history, exactly as it already does for <see cref="Approve"/>). Before this fix a single
+    /// final-step role holder terminated the document regardless of <c>QuorumCount</c> - the exact
+    /// N-05 defect (security review sprint-09.md §9.5), fixed here for Sprint 9's already-shipped
+    /// Payment Certificate code, not only for Sprint 10's Variation Order.</summary>
+    /// <param name="rejectQuorumSatisfied">Whether this vote, combined with whatever distinct
+    /// rejectors already voted for the final step on this <see cref="RevisionNo"/>, reaches the
+    /// step's <c>QuorumCount</c>. When <see langword="false"/>, the vote is accepted (the guards above
+    /// still run, and the caller is expected to still record an <c>ApprovalAction</c> row for it), and
+    /// (N-03 parity, domain-rules.md §8.2) <see cref="LastVoteAt"/> is still stamped, but the
+    /// certificate's <em>workflow</em> state does not change - it stays <c>PendingApproval</c>,
+    /// awaiting more distinct rejectors (or a <see cref="ReturnForRevision"/> from any pending step's
+    /// role holder - domain-rules.md §8.4's deadlock exit, deliberately left un-quorum-bound so a lone
+    /// dissenter can always send a split committee's document back). Defaults to
+    /// <see langword="true"/> (quorum of one, the overwhelmingly common <c>QuorumCount = 1</c>
+    /// configuration and every step's default) so that behaviour is completely unchanged.</param>
+    public void Reject(UserRole actorRole, UserRole expectedFinalStepRole, DateTimeOffset actedAt, bool rejectQuorumSatisfied = true)
     {
         if (Status != PaymentCertificateStatus.PendingApproval)
         {
@@ -378,6 +427,24 @@ public sealed class PaymentCertificate : Entity, ITenantOwned
         {
             throw new DomainException(
                 $"Actor role {actorRole} does not hold the required role {expectedFinalStepRole} to reject at the final step.");
+        }
+
+        // ADR-0016 / N-03 parity (domain-rules.md §8.2): stamped unconditionally, BEFORE the
+        // rejectQuorumSatisfied branch - identical reasoning to Approve's own LastVoteAt stamp above.
+        // Without this, a non-advancing rejection vote would leave this aggregate Unchanged, so two
+        // concurrent "first" rejectors on a QuorumCount >= 2 step could both load-then-decide from the
+        // same stale zero-prior-rejectors history and silently co-commit - exactly the N-03 failure
+        // mode already fixed for Approve, for the same underlying reason.
+        LastVoteAt = actedAt;
+
+        if (!rejectQuorumSatisfied)
+        {
+            // Vote recorded (by the caller, as an ApprovalAction) but the final step's QuorumCount has
+            // not yet been reached by enough distinct rejectors (ADR-0016: quorum binds rejection
+            // exactly as it binds approval) - still PendingApproval, awaiting more distinct rejectors.
+            // LastVoteAt above has already made sure this is not a silent no-op as far as EF/RowVersion
+            // are concerned.
+            return;
         }
 
         Status = PaymentCertificateStatus.Rejected;
@@ -497,6 +564,7 @@ public sealed class PaymentCertificate : Entity, ITenantOwned
         AllowSelfApproval = false;
         SubmittedByUserId = null;
         SubmittedAt = null;
+        LastVoteAt = null;
         _approvalSteps.Clear();
     }
 }

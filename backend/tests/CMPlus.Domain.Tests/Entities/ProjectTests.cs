@@ -135,6 +135,178 @@ public class ProjectTests
         Assert.Equal(480_000m, project.ContractValue);
     }
 
+    // ---- ADR-0015: OriginalContractValue / EscalationBaselineContractValue ----
+
+    [Fact]
+    public void OriginalContractValue_Defaults_To_ContractValue_At_Construction_Bac_Default_Case()
+    {
+        var project = Project.Create(
+            Guid.NewGuid(), "P", "C", "O",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMonths(6),
+            bac: 500_000m, dataDate: DateTimeOffset.UtcNow); // contractValue not supplied -> defaults to bac
+
+        Assert.Equal(500_000m, project.OriginalContractValue);
+        Assert.Equal(project.ContractValue, project.OriginalContractValue);
+    }
+
+    [Fact]
+    public void OriginalContractValue_Defaults_To_ContractValue_At_Construction_Explicit_Override_Case()
+    {
+        var project = Project.Create(
+            Guid.NewGuid(), "P", "C", "O",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMonths(6),
+            bac: 500_000m, dataDate: DateTimeOffset.UtcNow, contractValue: 480_000m);
+
+        Assert.Equal(480_000m, project.OriginalContractValue);
+    }
+
+    [Fact]
+    public void EscalationBaselineContractValue_Reads_OriginalContractValue_When_Present()
+    {
+        var project = CreateProject();
+
+        Assert.Equal(project.OriginalContractValue, project.EscalationBaselineContractValue);
+    }
+
+    /// <summary>
+    /// Sprint-10 security review H-02's explicitly requested invariant, the escalation-baseline
+    /// counterpart to <c>Project.BAC == BAC(now)</c>: <c>EscalationBaselineContractValue</c> must
+    /// equal <c>OriginalContractValue</c> unconditionally, in every state a <see cref="Project"/> can
+    /// reach - never a fallback to <c>ContractValue</c> (the exact self-diluting-denominator shape
+    /// ADR-0015 exists to remove). Before the fix, this held only when <c>OriginalContractValue</c>
+    /// happened to be non-null; a NULL "legacy" row would have silently broken it. Now that the column
+    /// is NOT NULL and the property is a trivial passthrough, this holds by construction rather than
+    /// by convention - asserted across every mutator that touches either field, so the invariant
+    /// cannot silently reopen if a future change reintroduces a fallback.
+    /// </summary>
+    [Fact]
+    public void Invariant_EscalationBaselineContractValue_Always_Equals_OriginalContractValue()
+    {
+        var project = CreateProject();
+        Assert.Equal(project.OriginalContractValue, project.EscalationBaselineContractValue); // fresh project
+
+        project.SetContractValue(project.ContractValue + 50_000_000m);
+        Assert.Equal(project.OriginalContractValue, project.EscalationBaselineContractValue); // after an ordinary edit
+
+        // A BAC edit is only legal before any VO is approved (ADR-0017), so exercise it first.
+        project.SetBac(project.BAC + 1_000_000m);
+        Assert.Equal(project.OriginalContractValue, project.EscalationBaselineContractValue); // after a BAC edit
+
+        project.ApplyVariationOrderApproval(2_000_000.00m, DateTimeOffset.UtcNow);
+        Assert.Equal(project.OriginalContractValue, project.EscalationBaselineContractValue); // after a VO approval
+    }
+
+    [Fact]
+    public void SetContractValue_Moves_ContractValue_But_Never_OriginalContractValue()
+    {
+        // ADR-0015: OriginalContractValue moves only via a formal contract amendment (not yet built -
+        // domain-rules.md §4.4). Plain Project Info master-data edits (SetContractValue, the same
+        // setter UpdateProjectCommandHandler calls) are NOT a contract amendment and must never
+        // silently rebase the escalation baseline - that would let an ordinary data edit erase VO
+        // escalation history exactly the way ADR-0015 condemns a cheap-amendment reset for doing.
+        var project = CreateProject(); // OriginalContractValue == ContractValue == BAC initially
+        var originalBaseline = project.OriginalContractValue;
+
+        project.SetContractValue(project.ContractValue + 50_000_000m);
+
+        Assert.Equal(originalBaseline, project.OriginalContractValue);
+        Assert.NotEqual(project.ContractValue, project.OriginalContractValue);
+        // EscalationBaselineContractValue must track the untouched baseline, not the edited current
+        // value - this is the exact self-dilution shape ADR-0015 fixes, asserted directly on Project.
+        Assert.Equal(originalBaseline, project.EscalationBaselineContractValue);
+    }
+
+    // ---- domain-rules.md §5.5(c): OriginalBac / EffectiveOriginalBac ----
+
+    [Fact]
+    public void OriginalBac_Defaults_To_Bac_At_Construction()
+    {
+        var project = Project.Create(
+            Guid.NewGuid(), "P", "C", "O",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMonths(6),
+            bac: 500_000m, dataDate: DateTimeOffset.UtcNow);
+
+        Assert.Equal(500_000m, project.OriginalBac);
+        Assert.Equal(project.BAC, project.OriginalBac);
+    }
+
+    [Fact]
+    public void EffectiveOriginalBac_Reads_OriginalBac_When_Present()
+    {
+        var project = CreateProject();
+
+        Assert.Equal(project.OriginalBac, project.EffectiveOriginalBac);
+    }
+
+    /// <summary>
+    /// ADR-0017. This test previously asserted that <c>SetBac</c> moves <c>BAC</c> but never
+    /// <c>OriginalBac</c> — which was S10-SEC-02 finding M-02 itself, encoded as a guarantee: the
+    /// edit persisted and displayed while every EVM figure (derived from
+    /// <c>OriginalBac + ΣVO</c>) silently ignored it. The human ruled 2026-08-10 that the edit is
+    /// legal only before any VO is approved, and moves both figures together so the §5.5(c)
+    /// invariant holds.
+    /// </summary>
+    [Fact]
+    public void SetBac_Before_Any_Vo_Moves_Bac_And_Its_Baseline_Together_Keeping_The_Invariant()
+    {
+        var project = CreateProject(); // OriginalBac == BAC, no approved VO yet
+
+        project.SetBac(project.BAC + 50_000_000m);
+
+        Assert.Equal(project.BAC, project.OriginalBac);
+        Assert.Equal(project.BAC, project.EffectiveOriginalBac);
+    }
+
+    [Fact]
+    public void SetBac_Is_Refused_Once_A_Vo_Has_Been_Approved_Rather_Than_Being_Silently_Ignored()
+    {
+        var project = CreateProject();
+        project.ApplyVariationOrderApproval(2_000_000.00m, DateTimeOffset.UtcNow);
+        var bacBefore = project.BAC;
+        var baselineBefore = project.OriginalBac;
+
+        var exception = Assert.Throws<DomainException>(() => project.SetBac(project.BAC + 1_000_000m));
+
+        // The message must explain *why*, not merely refuse - a PM who hits this needs to know the
+        // budget is derived, and what to do instead.
+        Assert.Contains("Variation Order", exception.Message);
+        Assert.Equal(bacBefore, project.BAC);
+        Assert.Equal(baselineBefore, project.OriginalBac);
+    }
+
+    /// <summary>
+    /// The offsetting-VO case is why <c>ApprovedVariationOrderCount</c> is counted explicitly rather
+    /// than inferred from <c>OriginalBac != BAC</c>: a Deduct VO that exactly cancels an earlier Add
+    /// leaves those two equal while approved VOs genuinely exist, and the inference would quietly
+    /// permit the edit this rule blocks.
+    /// </summary>
+    [Fact]
+    public void SetBac_Is_Still_Refused_When_Offsetting_Vos_Leave_Bac_Equal_To_Its_Baseline()
+    {
+        var project = CreateProject();
+        project.ApplyVariationOrderApproval(1_000_000.00m, DateTimeOffset.UtcNow);
+        project.ApplyVariationOrderApproval(-1_000_000.00m, DateTimeOffset.UtcNow);
+
+        Assert.Equal(project.OriginalBac, project.BAC); // the inference would say "no VOs here"
+        Assert.Equal(2, project.ApprovedVariationOrderCount);
+        Assert.Throws<DomainException>(() => project.SetBac(project.BAC + 1_000_000m));
+    }
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Never_Moves_OriginalBac()
+    {
+        // domain-rules.md §5.5(c): BAC^orig moves only with a future formal rebaseline event (never
+        // contemplated by this sprint), never as a side effect of an ordinary VO approval - otherwise
+        // BAC(t) reconstruction for dates before this VO's own ApprovedAt would retroactively change
+        // the instant the VO is approved, exactly the defect this field exists to prevent.
+        var project = CreateProject();
+        var originalBaseline = project.OriginalBac;
+
+        project.ApplyVariationOrderApproval(5_000_000.00m, DateTimeOffset.UtcNow);
+
+        Assert.Equal(originalBaseline, project.OriginalBac);
+    }
+
     [Fact]
     public void EacVariantDefault_Defaults_To_CpiBased()
     {
@@ -190,6 +362,121 @@ public class ProjectTests
 
         project.SetEacManualEtc(760_000.00m);
         Assert.Equal(760_000.00m, project.EacManualEtc);
+    }
+
+    // ---- S10-BE-03: ApplyVariationOrderApproval (domain-rules.md §5.1) ----
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Moves_Bac_And_ContractValue_By_The_Same_Signed_Amount_Add()
+    {
+        var project = CreateProject(); // BAC == ContractValue == 1,000,000.00
+
+        project.ApplyVariationOrderApproval(2_400_000.00m, DateTimeOffset.Parse("2026-08-10T09:00:00+07:00"));
+
+        Assert.Equal(3_400_000.00m, project.BAC);
+        Assert.Equal(3_400_000.00m, project.ContractValue);
+    }
+
+    /// <summary>
+    /// The exact risk domain-rules.md §3.4 flags for R2 extended to the approval effect: a Deduct
+    /// VO's signed <c>Amount</c> must drive BOTH figures DOWN. An implementation that silently applies
+    /// <c>Math.Abs(amount)</c> anywhere on this path would make BAC go UP on a Deduct VO instead - this
+    /// test fails loudly if that mutation is ever introduced.
+    /// </summary>
+    [Fact]
+    public void ApplyVariationOrderApproval_Moves_Bac_And_ContractValue_Down_For_A_Deduct_Signed_Negative_Amount()
+    {
+        var project = CreateProject(); // BAC == ContractValue == 1,000,000.00
+
+        project.ApplyVariationOrderApproval(-300_000.00m, DateTimeOffset.Parse("2026-08-10T09:00:00+07:00"));
+
+        Assert.Equal(700_000.00m, project.BAC);
+        Assert.Equal(700_000.00m, project.ContractValue);
+    }
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Never_Moves_OriginalContractValue()
+    {
+        // ADR-0015/domain-rules.md §4.4: the baseline moves only via a formal ContractAmendment
+        // (not yet built) - never as a side effect of an ordinary VO approval.
+        var project = CreateProject();
+        var originalBaseline = project.OriginalContractValue;
+
+        project.ApplyVariationOrderApproval(5_000_000.00m, DateTimeOffset.UtcNow);
+
+        Assert.Equal(originalBaseline, project.OriginalContractValue);
+    }
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Throws_Rather_Than_Clamps_When_A_Deduct_Would_Drive_Bac_Negative()
+    {
+        // domain-rules.md §5.1's Guard: the handler is expected to pre-validate this and never reach
+        // here on a well-formed request (422 VoWouldMakeContractValueNegative) - this proves the
+        // Domain-level guard is real defense-in-depth, not merely relied upon.
+        var project = CreateProject(); // BAC == 1,000,000.00
+
+        Assert.Throws<DomainException>(() => project.ApplyVariationOrderApproval(-1_000_000.01m, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Stamps_EacManualEtcStaleSince_When_A_Manual_Etc_Is_Set()
+    {
+        // domain-rules.md §5.7: a stale manual ETC would otherwise let a fully-funded VO make VAC
+        // improve by the full VO amount while EAC does not move at all - "a project forecast over
+        // budget now reports exactly on budget" purely because the estimate went stale.
+        var project = CreateProject();
+        project.SetEacManualEtc(70_000_000.00m);
+        var approvedAt = DateTimeOffset.Parse("2026-08-10T09:00:00+07:00");
+
+        project.ApplyVariationOrderApproval(10_000_000.00m, approvedAt);
+
+        Assert.Equal(approvedAt, project.EacManualEtcStaleSince);
+        // And the manual figure itself is NEVER auto-adjusted arithmetically - a bottom-up estimate
+        // is a professional judgement, not an arithmetic series (domain-rules.md §5.7's explicit rule).
+        Assert.Equal(70_000_000.00m, project.EacManualEtc);
+    }
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Does_Not_Stamp_EacManualEtcStaleSince_When_No_Manual_Etc_Is_Set()
+    {
+        var project = CreateProject(); // EacManualEtc is null by default
+
+        project.ApplyVariationOrderApproval(1_000_000.00m, DateTimeOffset.UtcNow);
+
+        Assert.Null(project.EacManualEtcStaleSince);
+    }
+
+    [Fact]
+    public void ApplyVariationOrderApproval_Does_Not_Move_EacManualEtcStaleSince_Once_Already_Stamped_By_An_Earlier_Vo()
+    {
+        // Two VOs approved while a manual ETC is stale: the staleness marker records WHEN it first
+        // went stale, not the most recent VO - re-stamping on every subsequent VO would not change
+        // correctness here, but the first-stale timestamp is the more useful audit signal, and this
+        // pins the actual (first-write-wins) behaviour so a future change is a deliberate decision.
+        var project = CreateProject();
+        project.SetEacManualEtc(50_000_000.00m);
+        var firstApproval = DateTimeOffset.Parse("2026-08-10T09:00:00+07:00");
+        var secondApproval = DateTimeOffset.Parse("2026-08-11T09:00:00+07:00");
+
+        project.ApplyVariationOrderApproval(1_000_000.00m, firstApproval);
+        project.ApplyVariationOrderApproval(2_000_000.00m, secondApproval);
+
+        Assert.Equal(firstApproval, project.EacManualEtcStaleSince);
+    }
+
+    [Fact]
+    public void SetEacManualEtc_Clears_EacManualEtcStaleSince()
+    {
+        // domain-rules.md §5.7: "The value is cleared when a QS re-enters EacManualEtc" - the only
+        // legitimate way the staleness marker is ever cleared.
+        var project = CreateProject();
+        project.SetEacManualEtc(50_000_000.00m);
+        project.ApplyVariationOrderApproval(1_000_000.00m, DateTimeOffset.UtcNow);
+        Assert.NotNull(project.EacManualEtcStaleSince);
+
+        project.SetEacManualEtc(52_000_000.00m);
+
+        Assert.Null(project.EacManualEtcStaleSince);
     }
 
     [Fact]

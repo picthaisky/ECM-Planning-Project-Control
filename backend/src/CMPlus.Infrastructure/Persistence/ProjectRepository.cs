@@ -10,6 +10,19 @@ public sealed class ProjectRepository(CmPlusDbContext dbContext) : IProjectRepos
     public Task<Project?> FindAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         dbContext.Projects.FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken);
 
-    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        dbContext.SaveChangesAsync(cancellationToken);
+    /// <summary>Catches only <see cref="DbUpdateConcurrencyException"/> - a constraint violation or
+    /// any other <c>DbUpdateException</c> must still surface rather than be silently reported as a
+    /// concurrency conflict (the same discipline `PaymentCertificateRepository` follows).</summary>
+    public async Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return true;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return false;
+        }
+    }
 }

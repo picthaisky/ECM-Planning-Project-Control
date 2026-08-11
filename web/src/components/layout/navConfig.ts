@@ -59,9 +59,18 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
  * content") but renders `ScreenPlaceholder` until its own sprint lands. `dashboard`/`cash` added
  * S8-FE-01/02; `payment` added S9-FE-01/02 (the milestone list + certificate panel load against
  * two endpoints that do not exist on the real backend yet — see `features/payment/api.ts`'s
- * remarks — but every approval-chain mutation is real and live). `weather`/`photo` (linked from
- * Dashboard's KPI tiles/photo strip) are deliberately *not* added yet: Sprint 11/12's backends
- * they'd need don't exist. */
+ * remarks — but every approval-chain mutation is real and live). `vo` added S10-FE-01/02 — the VO
+ * register, create/submit/approve chain, and content edit are all real, live endpoints (unlike
+ * Payment's own list/get gap); only the approval-action history read 404s today, for a different,
+ * narrower reason (`features/vo/api.ts#getVoApprovalActions`'s remarks). `weather`/`issue` added
+ * S11-FE-01 (US-11.1/US-11.2) — the weather-log register/correction-chain/EOT evaluation
+ * (`web/src/features/weather/`) and the issue/action log with its Open/Doing/Closed tile counts
+ * (`web/src/features/issue/`) are all real, live endpoints. `photo`/`maneq` added S12-FE-01/02
+ * (US-12.1/US-12.2) — offline photo capture + the IndexedDB outbox (`web/src/features/photo/`,
+ * `web/src/services/outbox/`) and the Man/Equipment KPI/histogram/PI screen
+ * (`web/src/features/maneq/`); both real, live endpoints, with the specific list/catalogue gaps on
+ * the Sprint 12 backend documented at each feature's own call sites (`features/photo/PhotoPage.tsx`,
+ * `features/maneq/ManeqPage.tsx`). */
 export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
   'dashboard',
   'info',
@@ -70,4 +79,9 @@ export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
   'evm',
   'cash',
   'payment',
+  'photo',
+  'vo',
+  'weather',
+  'maneq',
+  'issue',
 ])

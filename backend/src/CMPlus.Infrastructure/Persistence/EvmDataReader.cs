@@ -1,5 +1,6 @@
 using CMPlus.Application.Abstractions;
 using CMPlus.Application.Services.Evm;
+using CMPlus.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace CMPlus.Infrastructure.Persistence;
@@ -21,8 +22,48 @@ public sealed class EvmDataReader(CmPlusDbContext dbContext) : IEvmDataReader
             .AsNoTracking()
             .Where(p => p.Id == projectId)
             .Select(p => new ProjectEvmSettings(
-                p.BAC, p.DataDate, p.EacVariantDefault, p.EacCustomPerformanceFactor, p.EacManualEtc))
+                p.DataDate, p.EacVariantDefault, p.EacCustomPerformanceFactor, p.EacManualEtc, p.EacManualEtcStaleSince))
             .SingleOrDefaultAsync(cancellationToken);
+
+    /// <summary>
+    /// domain-rules.md §5.5(c). Sprint-10 security review H-02: <c>OriginalBac</c> is now NOT NULL
+    /// (backfilled by migration), so this projects it directly with no client-side <c>??</c> fallback
+    /// - the fallback used to read as the LIVE <c>BAC</c> for a "legacy" row, which double-counted
+    /// every already-approved VO (<c>BAC</c> already includes them) and inflated every historical EVM
+    /// read upward. Still a narrow, single-column projection (not
+    /// <c>Project.EffectiveOriginalBac</c> directly) purely for query-shape consistency with the rest
+    /// of this reader - that computed property is <c>Ignore()</c>'d from the EF model
+    /// (ProjectConfiguration.cs) precisely so it is never relied on to translate inside a
+    /// LINQ-to-Entities query.
+    /// </summary>
+    public async Task<decimal> GetBacAsOfAsync(Guid projectId, DateTimeOffset asOf, CancellationToken cancellationToken = default)
+    {
+        var originalBac = await dbContext.Projects
+            .AsNoTracking()
+            .Where(p => p.Id == projectId)
+            .Select(p => (decimal?)p.OriginalBac)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (originalBac is null)
+        {
+            // Caller (EvmComputationService) already confirmed the project exists via
+            // GetProjectSettingsAsync before ever calling this - mirrors GetActivityInputsAsync's own
+            // "benign default, never a second not-found signal" contract.
+            return 0m;
+        }
+
+        // Sprint 10's own filtered covering index (VariationOrderConfiguration.cs:
+        // IX_VariationOrders_TenantId_ProjectId_Approved, INCLUDE (Amount), WHERE Status = 3) does not
+        // include ApprovedAt, so this seeks that index and then filters ApprovedAt <= asOf rather than
+        // being fully covered by it - acceptable here (an EVM read, not the WBS-tree <100ms path) and
+        // narrower than a full scan regardless (still Status = Approved AND ProjectId = this project).
+        var approvedVoTotal = await dbContext.VariationOrders
+            .AsNoTracking()
+            .Where(v => v.ProjectId == projectId && v.Status == VariationOrderStatus.Approved && v.ApprovedAt <= asOf)
+            .SumAsync(v => (decimal?)v.Amount, cancellationToken) ?? 0m;
+
+        return originalBac.Value + approvedVoTotal;
+    }
 
     public async Task<IReadOnlyList<EvmActivityProgressInput>> GetActivityInputsAsync(
         Guid projectId, DateTimeOffset asOf, CancellationToken cancellationToken = default)

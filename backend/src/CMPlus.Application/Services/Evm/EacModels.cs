@@ -58,4 +58,16 @@ public static class EvmWarningCodes
     /// decision is made.
     /// </summary>
     public const string ActualCostIsNegative = "ActualCostIsNegative";
+
+    /// <summary>
+    /// domain-rules.md §5.7's ⚠ rule: <see cref="CMPlus.Domain.Entities.Project.EacManualEtcStaleSince"/>
+    /// is set - an approved Variation Order has moved <c>BAC</c> since <c>EacManualEtc</c> was last
+    /// (re-)entered. <see cref="EacVariant.BottomUpEtc"/>'s $EAC$ does not track the VO (a bottom-up
+    /// estimate is a professional judgement, never an arithmetic series - it is never auto-adjusted by
+    /// $A$) while $VAC$ silently improves by the full VO amount, purely because the input went stale -
+    /// "a project forecast 10,000,000.00 over budget now reports exactly on budget" after a
+    /// +10,000,000.00 VO with no real improvement behind it. Cleared only by
+    /// <see cref="CMPlus.Domain.Entities.Project.SetEacManualEtc"/> (a QS re-entering the figure).
+    /// </summary>
+    public const string ManualEtcPredatesBacChange = "ManualEtcPredatesBacChange";
 }

@@ -39,8 +39,12 @@ const PAYMENT_ERROR_TITLES: Record<string, string> = {
   PaymentCertificateSelfApprovalNotPermitted: 'ผู้สร้างหรือผู้ยื่นเอกสารไม่สามารถอนุมัติเอกสารฉบับของตนเองได้',
   'self-approval-not-permitted': 'ผู้สร้างหรือผู้ยื่นเอกสารไม่สามารถอนุมัติเอกสารฉบับของตนเองได้',
 
-  PaymentCertificateDuplicateChainApprover: 'คุณได้อนุมัติขั้นตอนอื่นของเอกสารฉบับนี้ไปแล้ว ไม่สามารถอนุมัติซ้ำได้',
-  'duplicate-chain-approver': 'คุณได้อนุมัติขั้นตอนอื่นของเอกสารฉบับนี้ไปแล้ว ไม่สามารถอนุมัติซ้ำได้',
+  // ADR-0016 (2026-08-10) / backend PaymentApprovalErrorCodes.cs: renamed from
+  // PaymentCertificateDuplicateChainApprover / 'duplicate-chain-approver' - widened from
+  // Approve-only to Approve-or-Reject ("no actor may both approve and reject the same revision"),
+  // so the code and the Thai copy below can no longer say only "อนุมัติ" (approve).
+  PaymentCertificateDuplicateChainVoter: 'คุณได้อนุมัติหรือปฏิเสธขั้นตอนอื่นของเอกสารฉบับนี้ไปแล้ว ไม่สามารถลงมติซ้ำได้',
+  'duplicate-chain-voter': 'คุณได้อนุมัติหรือปฏิเสธขั้นตอนอื่นของเอกสารฉบับนี้ไปแล้ว ไม่สามารถลงมติซ้ำได้',
 
   PaymentCertificateConcurrencyConflict: 'มีการเปลี่ยนแปลงเอกสารนี้พร้อมกันจากที่อื่น กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง',
   'concurrent-transition': 'มีการเปลี่ยนแปลงเอกสารนี้พร้อมกันจากที่อื่น กรุณาโหลดข้อมูลใหม่แล้วลองอีกครั้ง',

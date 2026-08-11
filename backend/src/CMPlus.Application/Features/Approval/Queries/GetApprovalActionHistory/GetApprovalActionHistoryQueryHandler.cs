@@ -19,16 +19,21 @@ namespace CMPlus.Application.Features.Approval.Queries.GetApprovalActionHistory;
 ///
 /// <para>The existence check is necessarily per-<see cref="ApprovalDocumentType"/> - "does a
 /// document with this id exist" has a different answer for each aggregate - so it is the one part of
-/// this otherwise-generic handler that is not yet fully document-type-agnostic.
-/// <see cref="ApprovalDocumentType.VariationOrder"/> has no aggregate at all yet (lands Sprint 10,
-/// ADR-0008), so by definition no such document exists to have a history; that arm intentionally
-/// returns "not found" rather than throwing, so calling this query with <c>VariationOrder</c> today
-/// degrades to a correct 404 instead of a crash. Sprint 10 adds one case arm here (plus its own
-/// document-existence check and, if the generic 404 code's name is judged misleading for a VO,
-/// its own not-found code) - not a redesign.</para>
+/// this otherwise-generic handler that is not yet fully document-type-agnostic. Sprint 10 added the
+/// <see cref="ApprovalDocumentType.VariationOrder"/> arm alongside its aggregate.</para>
+///
+/// <para><b>Lesson worth keeping.</b> Before that arm existed, the <c>_ =&gt; false</c> default made
+/// <c>GET /variation-orders/{id}/approval-actions</c> return 404 <i>unconditionally</i> - the route,
+/// the controller and the shared DTO were all real and shipped, so nothing failed to compile and no
+/// backend test noticed. It was caught only when <c>frontend-developer</c> tried to consume the
+/// endpoint. A fail-closed default is the right choice here, but it converts "unimplemented" into a
+/// response that is indistinguishable from a legitimate 404, so any new document type must add its
+/// arm in the same change that adds its routes.</para>
 /// </summary>
 public sealed class GetApprovalActionHistoryQueryHandler(
-    IApprovalActionRepository approvalActions, IPaymentCertificateRepository paymentCertificates)
+    IApprovalActionRepository approvalActions,
+    IPaymentCertificateRepository paymentCertificates,
+    IVariationOrderRepository variationOrders)
     : IRequestHandler<GetApprovalActionHistoryQuery, Result<IReadOnlyList<ApprovalActionDto>>>
 {
     public async Task<Result<IReadOnlyList<ApprovalActionDto>>> Handle(
@@ -50,8 +55,13 @@ public sealed class GetApprovalActionHistoryQueryHandler(
         {
             ApprovalDocumentType.PaymentCertificate =>
                 await paymentCertificates.GetByIdAsync(documentId, cancellationToken) is not null,
-            // ApprovalDocumentType.VariationOrder: no aggregate exists yet (Sprint 10) - see this
-            // type's remarks.
+            ApprovalDocumentType.VariationOrder =>
+                await variationOrders.GetByIdAsync(documentId, cancellationToken) is not null,
+            // Any future document type falls through to "not found" rather than throwing, which is
+            // the fail-closed direction. Note this arm silently made the whole VO history endpoint
+            // return 404 unconditionally between S10-BE-01 landing the aggregate and this arm being
+            // added - a stale `_ => false` is indistinguishable from a real 404 at the API surface,
+            // so a new document type must add its arm here in the same change that adds its routes.
             _ => false,
         };
 }

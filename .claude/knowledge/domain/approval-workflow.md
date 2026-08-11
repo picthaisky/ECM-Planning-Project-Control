@@ -34,10 +34,16 @@ Scope is domain + workflow only — no UI. Companion money math lives in
 States: `Draft`, `PendingApproval`, `Approved`, `Rejected`, `Cancelled`.
 `Approved`, `Rejected`, `Cancelled` are terminal — no transition leaves them. A superseding VO is
 always a **new record**, never an edit of a terminal one.
+The `reject` arrow in the diagram is the *terminal* transition; on a step with `QuorumCount > 1` it
+fires only once `QuorumCount` distinct role-holders have rejected (§6.2a). Full Sprint 10 rules —
+guards, field-freeze matrix, approval effects, fixtures — are in
+`docs/specs/variation-order/domain-rules.md`.
 
 **Gap against the current data model:** docs/9. §4 gives `VariationOrder.Status` as
 `Pending/Approved/Rejected` only. `Draft` and `Cancelled` must be added, and
 `Pending` renamed `PendingApproval` for symmetry with the payment enum.
+*(Status 2026-08-10: the `VariationOrderStatus` enum already carries all five values; the migration
+that lands them in the database is S10-DB-01, not yet applied.)*
 The prototype's "ตีกลับ" badge is currently mapped to `rejected` — it must map to
 **return-for-revision** (→ `Draft`), otherwise a returned VO can never be resubmitted.
 
@@ -76,7 +82,7 @@ as two different figures.
 | `Draft` | `Submit` | chain resolves to ≥ 1 step (§5.3); all required fields valid | `PendingApproval` (step 1) | snapshot the resolved chain + `ApprovalPolicyVersionId` onto the document; freeze editable fields; audit |
 | `PendingApproval` | `Approve` | actor holds step role; actor ≠ creator/submitter (§6.1); actor has not already approved this step | same state, `StepNo+1`, **or** `Approved`/`Certified` when chain exhausted | write `ApprovalAction`; on final step run the approval effects (§7); audit |
 | `PendingApproval` | `ReturnForRevision` | actor holds any pending step's role; comment mandatory | `Draft` | `RevisionNo += 1`; **void all approvals collected on this revision**; unfreeze fields; audit |
-| `PendingApproval` | `Reject` | actor holds the **final** step's role; comment mandatory | `Rejected` | terminal; audit |
+| `PendingApproval` | `Reject` | actor holds the **final** step's role; actor has cast no prior `Approve`/`Reject` on this revision (§6.2a); comment mandatory | same state (vote recorded) until `QuorumCount` distinct rejectors, then `Rejected` | write `ApprovalAction`; stamp `LastVoteAt` even when non-advancing; terminal only on the $q$-th rejection; audit |
 | `PendingApproval` | `Withdraw` | actor = submitter, no step approved yet | `Draft` | void chain snapshot; audit |
 | `Draft` | `Cancel` | actor = creator or PM | `Cancelled` | terminal; audit |
 | `Certified` | `RecordPayment` | payment reference + date supplied | `Paid` | posts retention accrual and advance recovery to the ledger; audit |
@@ -85,7 +91,8 @@ Rules that hold for every transition:
 
 - Only `Reject` (final step) is terminal-negative; **intermediate approvers may only return for
   revision**, never kill a document — mirrors real construction practice where only the ultimate
-  authority refuses.
+  authority refuses. On a step with `QuorumCount > 1`, "the ultimate authority" means the quorum,
+  not any one member of it — see §6.2a.
 - A comment is mandatory on `Reject` and `ReturnForRevision`, optional on `Approve`.
 - Concurrency: transitions take an optimistic-concurrency token (`RowVersion`). Two approvers
   clicking simultaneously → the second gets `409 Conflict`, never a double-advance.
@@ -185,11 +192,59 @@ Notes that matter:
 1. **Separation of duties.** The creator and the submitter may not approve any step, unless
    `AllowSelfApproval = 1` on the policy. Default off. A single user may not satisfy two steps of
    the same chain even if they hold both roles — each step needs a distinct human.
-2. **Quorum.** A step clears only when `QuorumCount` *distinct* users of that role have approved it.
+2. **Quorum (approval).** A step clears only when `QuorumCount` *distinct* users of that role have
+   approved it.
+
+   **2a. Quorum binds rejection too — and no one may vote both ways.** *(Ruled by `domain-expert`
+   2026-08-10, closing finding **N-05** in `docs/security/reviews/sprint-09.md` §9.5 and its
+   predecessor L-02 §4. Full reasoning and fixtures V-11a–f:
+   `docs/specs/variation-order/domain-rules.md` §8.)*
+
+   - A step terminates the document only when **`QuorumCount` *distinct* users of that role have
+     rejected it**, counted exactly as approvals are (`Action = Reject`, same `RevisionNo`, same
+     `StepNo`). Until the $q$-th rejection the vote is recorded as an `ApprovalAction`, the
+     aggregate is stamped (`LastVoteAt`, so `rowversion` serialises concurrent rejectors — the
+     N-03 fix applies in both directions), and the document stays `PendingApproval`.
+   - **No actor may cast both an `Approve` and a `Reject` on the same revision.** The existing
+     `DuplicateChainApprover` predicate widens to `Action ∈ {Approve, Reject}` and is renamed
+     **`DuplicateChainVoter`**. It stays strictly broader than either quorum count's predicate, so
+     no actor can appear twice in either counted set.
+   - Unchanged: only the **final** step's role holder may reject at all; intermediate approvers may
+     only `ReturnForRevision`; `q` is read from the document's **snapshotted** rung, never
+     re-derived from the policy (H-01).
+   - **`ReturnForRevision` is deliberately *not* quorum-bound** and stays available to any holder of
+     any pending step's role. It is what makes 2a deadlock-free: a `q = 2` step holding one
+     approval and one rejection satisfies neither quorum and both voters are now blocked, so the
+     lone dissenter sends the document back instead — how a split committee actually behaves. Expose
+     `QuorumSplit` plus per-step vote counts on the document DTO so a human can see the condition.
+
+   **Why:** the object of a quorum is the *decision*, not its direction. An organisation that
+   configures dual control is asserting "a decision of this consequence needs two humans"; reading
+   that as "two to say yes, one to say no" is a different control from the one the customer
+   switched on. Refusal is a positive act with contractual weight — a rejected VO can refuse a
+   contractor payment for work already instructed; under FIDIC 3.5 (1999) / 3.7 (2017) the
+   Engineer's refusal is a formal **determination** appealable to the DAAB, and under Thai public
+   procurement งานเพิ่ม/งานลด are decided by a คณะกรรมการตรวจรับพัสดุ acting by **มติ**, not by any
+   one member. The prior literal reading of §6.1 (which restricts *approval* only) was silence, not
+   a decision. **Blast radius:** `QuorumCount = 1`, the default and overwhelmingly common case, is
+   completely unaffected — one rejector still terminates.
+
+   ⚠ **This changes shipped Sprint 9 Payment Certificate behaviour**, not only Sprint 10's VOs:
+   (i) an actor who approved 1-of-2 may currently then reject (execution-verified, §9.5); (ii) one
+   rejector currently terminates a `QuorumCount = 2` step; (iii) rejections do not currently stamp
+   `LastVoteAt`. All three are to be fixed in the shared handlers during Sprint 10 and re-verified
+   by execution under S10-SEC-01.
 3. **Revision voiding.** `ReturnForRevision` voids every approval collected on that revision. No
    partial carry-over — it is the only defensible rule when the amount may have changed.
 4. **Immutability.** From `PendingApproval` onward the money fields are frozen. Payment
-   certificates stay immutable after `Certified` forever (conventions.md).
+   certificates stay immutable after `Certified` forever (conventions.md). For a VO the same
+   freeze covers `Amount`/`Type` **and the scope payload**, with one deliberate difference:
+   supporting attachments may be **appended** (never removed or replaced) while `PendingApproval`,
+   because a variation's case rests on drawings and site instructions and forcing a
+   `ReturnForRevision` — which voids every collected approval — merely to attach one is a
+   workflow failure. Append-only means nothing already signed is altered; the addition writes an
+   `AuditLog` entry, **not** an `ApprovalAction` (that enum stays "a human decision act"). See
+   `docs/specs/variation-order/domain-rules.md` §2.4.
 5. **Tenant scoping.** Policy lookup, approver lookup and every document query are `TenantId`-scoped
    (ADR-0002). A cross-tenant approver resolution is release-blocking.
 6. **Audit.** Every transition writes `AuditLog` (Before/After JSON) *and* `ApprovalAction`.
@@ -256,10 +311,19 @@ step 3 `ProjectDirector` (10,000,000.00 → ∞).
 1. **IPC routing amount:** gross certified $G_k$ (recommended) or net payment $N_k$? Affects how
    often the Director is pulled in — at $r=5\%,a=10\%$ the net is 15% lower than the gross, so
    certificates near a threshold would route differently.
-2. **Cumulative-VO escalation threshold:** is 10% of contract value the right default for this
-   organisation, and does it reset when a formal contract amendment absorbs the approved VOs?
+2. **Cumulative-VO escalation threshold** (= risk R-04 in `docs/10.` §11, due before Sprint 10):
+   is 10% the right default, and does the counter reset when a formal contract amendment absorbs
+   the approved VOs? **Still open — no default is set anywhere; `CumulativeVoEscalationPct` is
+   nullable and `NULL` means "no escalation configured", never "10".** Two further sub-questions
+   were surfaced while specifying it, and both change the answer more than the threshold does:
+   what goes in the **numerator** (net signed / gross absolute / additions-only) and in the
+   **denominator** (original vs current contract value — the shipped `ApprovalRoutingService`
+   silently implements *current*, which is self-diluting). Full statement of all four, with
+   fixtures that make each choice testable: `docs/specs/variation-order/domain-rules.md` §4.
 3. **Can an intermediate approver reject outright?** Recommended answer is no (return-for-revision
-   only). Confirm this matches the organisation's DoA.
+   only). Confirm this matches the organisation's DoA. *(Distinct from the quorum question, which
+   is no longer open — see §6.2a for the ruling on whether one person may terminally reject a step
+   configured for two signatures.)*
 4. **Role list:** docs/9. §4 lists `PM/Planning/Site/QS/Executive/Admin` but the docs elsewhere
    mention Project Director. `ProjectDirector` is required for a 3-tier VO matrix — confirm it is a
    real role to be added to the `User.Role` enum.

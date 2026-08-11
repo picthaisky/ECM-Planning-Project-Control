@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
 using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
@@ -44,7 +44,11 @@ public sealed class ApprovePaymentCertificateCommandHandler(
             return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.CorruptApprovalChain);
         }
 
-        var actorUserId = currentUser.UserId ?? Guid.Empty;
+        if (currentUser.UserId is not { } actorUserId)
+        {
+            return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.ActorRequired);
+        }
+
         var actorRole = currentUser.Role;
 
         // design.md §1.2 "Approve re-checks": actor holds the current step's role... - resolved
@@ -66,20 +70,28 @@ public sealed class ApprovePaymentCertificateCommandHandler(
         // even if they hold both roles - each step needs a distinct human." This also guarantees the
         // H-02 quorum count below is already counting distinct actors: no actor can appear twice in
         // this revision's Approve history at all, let alone twice for the same step.
+        //
+        // ADR-0016 / domain-rules.md §8.3: widened from "already Approved" to "already voted at all
+        // (Approve OR Reject)" this revision - closes N-05 (sprint-09.md §9.5), where an actor who
+        // approved 1-of-2 could then Reject and terminate a QuorumCount=2 step alone. Renamed
+        // DuplicateChainApprover -> DuplicateChainVoter to match: the predicate is no longer
+        // approve-specific.
         var history = await actionRepository.GetHistoryAsync(ApprovalDocumentType.PaymentCertificate, certificate.Id, cancellationToken);
-        var alreadyApprovedThisRevision = history.Any(a =>
-            a.RevisionNo == certificate.RevisionNo && a.Action == ApprovalActionType.Approve && a.ActorUserId == actorUserId);
-        if (alreadyApprovedThisRevision)
+        var alreadyVotedThisRevision = history.Any(a =>
+            a.RevisionNo == certificate.RevisionNo
+            && a.ActorUserId == actorUserId
+            && (a.Action == ApprovalActionType.Approve || a.Action == ApprovalActionType.Reject));
+        if (alreadyVotedThisRevision)
         {
-            return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.DuplicateChainApprover);
+            return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.DuplicateChainVoter);
         }
 
         // H-02 fix (security review sprint-09.md): a step clears only once QuorumCount DISTINCT
         // users have approved THAT SPECIFIC STEP (approval-workflow.md §6.2), not merely "someone
         // approved". Counted from the append-only ApprovalAction ledger already loaded above -
-        // .Distinct() is redundant given the DuplicateChainApprover check just above (which already
-        // guarantees every actor appears at most once across the whole revision) but is kept as a
-        // defensive, self-documenting belt-and-braces measure.
+        // .Distinct() is redundant given the DuplicateChainVoter check just above (which already
+        // guarantees every actor appears at most once across the whole revision, in either direction)
+        // but is kept as a defensive, self-documenting belt-and-braces measure.
         var priorDistinctApproversForThisStep = history
             .Where(a => a.RevisionNo == certificate.RevisionNo && a.StepNo == certificate.CurrentStepNo && a.Action == ApprovalActionType.Approve)
             .Select(a => a.ActorUserId)

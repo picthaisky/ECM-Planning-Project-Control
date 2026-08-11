@@ -31,7 +31,10 @@ interface KindConfig {
 const KIND_CONFIG: Record<ApprovalActionModalKind, KindConfig> = {
   approve: {
     title: 'ยืนยันการอนุมัติ',
-    description: 'คุณกำลังอนุมัติใบรับรองผลงานฉบับนี้ในขั้นตอนของคุณ ความเห็นเป็นทางเลือก',
+    // Deliberately document-type-agnostic ("เอกสารฉบับนี้", not "ใบรับรองผลงานฉบับนี้") — this modal
+    // is shared by Payment Certificate (S9-FE-02) and Variation Order (S10-FE-01) via the now
+    // document-agnostic `ApprovalChainBar`; see that component's own remarks.
+    description: 'คุณกำลังอนุมัติเอกสารฉบับนี้ในขั้นตอนของคุณ ความเห็นเป็นทางเลือก',
     commentRequired: false,
     confirmLabel: 'อนุมัติ',
     confirmVariant: 'primary',
@@ -65,6 +68,9 @@ const KIND_CONFIG: Record<ApprovalActionModalKind, KindConfig> = {
  * approve). One component, three configurations (`KIND_CONFIG`) rather than three near-duplicate
  * modals, so the copy distinguishing "ตีกลับ" from "ปฏิเสธ" lives in exactly one place — matches
  * `features/wbs/DecreaseConfirmModal.tsx`'s established confirm-modal pattern.
+ *
+ * Document-type-agnostic (S10-FE-01 reuses it unchanged for Variation Order — same trap, same fix:
+ * ADR-0016 widens the reject-quorum rule the "ปฏิเสธ" copy below already warns is terminal).
  */
 export function ApprovalActionModal({ kind, isOpen, onCancel, onConfirm, busy, errorMessage }: ApprovalActionModalProps) {
   const [comment, setComment] = useState('')

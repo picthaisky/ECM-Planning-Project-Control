@@ -122,7 +122,11 @@ public class RoutingFixtureTests
             ? new ApprovalRoutingRequest(documentType, ProjectId: null, amount, SubmittedAt, [policy])
             : new ApprovalRoutingRequest(
                 documentType, ProjectId: null, amount, SubmittedAt, [policy],
-                ContractValue: PolicyContractValue(policyName),
+                // ADR-0015: the fixture file's "contractValue" is $C^{orig}$ (domain-rules.md §4.3's
+                // Reading A - the only reading that reproduces both R4's stated chain and 10.14%), so
+                // it maps straight onto EscalationBaselineContractValue with no value change, only the
+                // renamed parameter.
+                EscalationBaselineContractValue: PolicyContractValue(policyName),
                 CumulativeApprovedVoAmount: inputs.TryGetProperty("cumulativeApprovedVoBefore", out var cb) ? cb.GetDecimal() : 0m);
 
         var result = _service.Resolve(request);
@@ -138,13 +142,21 @@ public class RoutingFixtureTests
         if (expected.TryGetProperty("escalationTriggered", out var escalationTriggered))
         {
             // R4: explicitly prove the escalation - not the amount band alone - is what appended
-            // the extra step. Re-resolve the identical amount with no ContractValue/cumulative
-            // supplied (escalation input withheld) and confirm the band-only chain is exactly the
-            // fixture's own "bandChain", one step shorter than the escalated result.
+            // the extra step. Re-resolve the identical amount with the cumulative cleared to 0 (so
+            // Phi is nowhere near the threshold) and confirm the band-only chain is exactly the
+            // fixture's own "bandChain", one step shorter than the escalated result. The baseline
+            // contract value itself is still supplied (S10-BE-02 / domain-rules.md §4.6: once a
+            // policy has CumulativeVoEscalationPct configured, omitting the baseline entirely is a
+            // 422 ContractValueNotConfigured, not a silent "escalation off" switch) - what varies here
+            // is purely whether the ratio crosses the threshold, which is what this assertion is
+            // actually about.
             Assert.True(escalationTriggered.GetBoolean());
             Assert.True(result.Value.EscalationApplied);
 
-            var bandOnlyRequest = new ApprovalRoutingRequest(documentType, ProjectId: null, amount, SubmittedAt, [policy]);
+            var bandOnlyRequest = new ApprovalRoutingRequest(
+                documentType, ProjectId: null, amount, SubmittedAt, [policy],
+                EscalationBaselineContractValue: PolicyContractValue(policyName),
+                CumulativeApprovedVoAmount: 0m);
             var bandOnlyResult = _service.Resolve(bandOnlyRequest);
 
             Assert.True(bandOnlyResult.IsSuccess);

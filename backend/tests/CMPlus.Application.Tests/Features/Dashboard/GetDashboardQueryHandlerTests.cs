@@ -14,10 +14,19 @@ public class GetDashboardQueryHandlerTests
     private sealed class FakeEvmDataReader : IEvmDataReader
     {
         public ProjectEvmSettings? SettingsToReturn { get; set; }
+
+        /// <summary>Default matches this file's own former <c>ProjectEvmSettings.Bac</c> literal, now
+        /// resolved via the separate date-aware <see cref="GetBacAsOfAsync"/> reader call
+        /// (domain-rules.md §5.5(c)) rather than carried on the settings record.</summary>
+        public decimal BacToReturn { get; set; } = 1_000_000.00m;
+
         public IReadOnlyList<EvmActivityProgressInput> ActivityInputsToReturn { get; set; } = [];
 
         public Task<ProjectEvmSettings?> GetProjectSettingsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
             Task.FromResult(SettingsToReturn);
+
+        public Task<decimal> GetBacAsOfAsync(Guid projectId, DateTimeOffset asOf, CancellationToken cancellationToken = default) =>
+            Task.FromResult(BacToReturn);
 
         public Task<IReadOnlyList<EvmActivityProgressInput>> GetActivityInputsAsync(
             Guid projectId, DateTimeOffset asOf, CancellationToken cancellationToken = default) =>
@@ -51,7 +60,6 @@ public class GetDashboardQueryHandlerTests
     }
 
     private static ProjectEvmSettings SettingsForFixtureA(EacVariant variant = EacVariant.CpiBased) => new(
-        Bac: 1_000_000.00m,
         ProjectDataDate: DateTimeOffset.Parse("2026-06-30T00:00:00+07:00"),
         EacVariantDefault: variant,
         EacCustomPerformanceFactor: null,

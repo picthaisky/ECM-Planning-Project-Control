@@ -4,6 +4,11 @@
     <PackageReference Include="MediatR" Version="12.5.0" />
     <PackageReference Include="FluentValidation" Version="11.11.0" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.11.0" />
+    <!-- Abstractions only (no concrete provider) - needed for L-04 (security review sprint-12.md):
+         GetPhotoContentQueryHandler logs a Warning, with the photo id (never the storage key), when
+         a Photo row exists but its blob is missing from storage, instead of letting a raw
+         FileNotFoundException reach GlobalExceptionHandler as an unhandled 500. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>

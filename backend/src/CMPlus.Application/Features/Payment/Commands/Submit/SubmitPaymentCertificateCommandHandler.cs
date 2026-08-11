@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Application.Approval;
 using CMPlus.Domain.Common;
 using CMPlus.Domain.Entities;
@@ -53,7 +53,11 @@ public sealed class SubmitPaymentCertificateCommandHandler(
         }
 
         var chain = routingResult.Value;
-        var actorUserId = currentUser.UserId ?? Guid.Empty;
+        if (currentUser.UserId is not { } actorUserId)
+        {
+            return Result<PaymentCertificateDto>.Failure(PaymentApprovalErrorCodes.ActorRequired);
+        }
+
 
         // H-01 fix (security review sprint-09.md): snapshot the resolved chain - exactly as the
         // routing engine produced it for THIS document's routing amount - onto the certificate

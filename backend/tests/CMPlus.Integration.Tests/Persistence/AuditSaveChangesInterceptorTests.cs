@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
 using CMPlus.Domain.Entities;
@@ -177,5 +178,98 @@ public class AuditSaveChangesInterceptorTests
         // Exactly one row (the Project) - no second row auditing the AuditLog insert itself.
         Assert.Single(logs);
         Assert.DoesNotContain(logs, l => l.EntityName == nameof(AuditLog));
+    }
+
+    /// <summary>
+    /// S11-BE-01/03 (CLAUDE.md non-negotiable: "every mutating operation writes an audit log
+    /// entry") - proven concretely for the two new entities rather than only trusted by reading
+    /// AuditSaveChangesInterceptor's generic, entity-type-agnostic mechanism. Recording a weather
+    /// log writes one Created row for it, AND one for its owned AffectedActivities child row - the
+    /// interceptor audits every changed entity in the unit of work, not just the aggregate root.
+    /// </summary>
+    [Fact]
+    public async Task Recording_A_Weather_Log_Writes_Created_AuditLog_Rows_For_The_Log_And_Its_Affected_Activity()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorUserId = Guid.NewGuid();
+        var databaseName = Guid.NewGuid().ToString();
+        var activityId = Guid.NewGuid();
+
+        using (var context = CreateContext(tenantId, actorUserId, databaseName))
+        {
+            var log = DailyWeatherLog.CreateOriginal(
+                tenantId, Guid.NewGuid(), DateTimeOffset.Parse("2026-07-11T00:00:00+07:00"), WeatherCondition.HeavyRain,
+                "ฝนตกหนัก", 42.5m, WeatherImpact.FullStoppage, "หยุดเทคอนกรีตโซน B ครึ่งวัน", 8.00m, actorUserId,
+                DateTimeOffset.Parse("2026-07-11T18:00:00+07:00"), [activityId]);
+            context.DailyWeatherLogs.Add(log);
+            await context.SaveChangesAsync();
+        }
+
+        using var verify = CreateContext(tenantId, actorUserId, databaseName);
+        var logs = await verify.AuditLogs.ToListAsync();
+
+        var weatherLogAudit = Assert.Single(logs, l => l.EntityName == nameof(DailyWeatherLog));
+        Assert.Equal(AuditAction.Created, weatherLogAudit.Action);
+        Assert.Equal(actorUserId, weatherLogAudit.UserId);
+        Assert.Null(weatherLogAudit.BeforeJson);
+
+        // Parsed rather than raw-substring-matched: System.Text.Json's default encoder escapes
+        // non-ASCII text (Thai, in this codebase's actual UI copy - CLAUDE.md "Thai-first") as
+        // \uXXXX sequences, so the literal Thai string never appears verbatim in AfterJson even
+        // though it round-trips correctly - a real gap this test's first draft (raw Contains(Thai))
+        // did not catch until actually run. Enums serialize as their bare underlying int here too
+        // (this raw JsonSerializer.Serialize call has no JsonStringEnumConverter, unlike the WebApi's
+        // MVC JSON options) - asserted as such rather than assumed.
+        using var afterDoc = JsonDocument.Parse(weatherLogAudit.AfterJson!);
+        Assert.Equal("ฝนตกหนัก", afterDoc.RootElement.GetProperty("ConditionNote").GetString());
+        Assert.Equal((int)WeatherCondition.HeavyRain, afterDoc.RootElement.GetProperty("Condition").GetInt32());
+        Assert.Equal(42.5m, afterDoc.RootElement.GetProperty("RainfallMm").GetDecimal());
+        Assert.Equal((int)WeatherImpact.FullStoppage, afterDoc.RootElement.GetProperty("Impact").GetInt32());
+
+        var affectedActivityAudit = Assert.Single(logs, l => l.EntityName == nameof(DailyWeatherLogActivity));
+        Assert.Equal(AuditAction.Created, affectedActivityAudit.Action);
+        using var affectedDoc = JsonDocument.Parse(affectedActivityAudit.AfterJson!);
+        Assert.Equal(activityId, affectedDoc.RootElement.GetProperty("ActivityId").GetGuid());
+    }
+
+    /// <summary>Same proof for <see cref="IssueLog"/>: creation writes one Created row, and the
+    /// later <c>AdvanceStatus</c> mutation writes a separate Updated row with a real before/after
+    /// Status diff - not silently skipped because the entity is mutable rather than append-only.</summary>
+    [Fact]
+    public async Task Creating_And_Advancing_An_Issue_Each_Write_Their_Own_AuditLog_Row()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorUserId = Guid.NewGuid();
+        var databaseName = Guid.NewGuid().ToString();
+
+        Guid issueId;
+        using (var context = CreateContext(tenantId, actorUserId, databaseName))
+        {
+            var issue = new IssueLog(
+                tenantId, Guid.NewGuid(), "เหล็กเส้น DB25 ส่งช้า", "ซัพพลายเออร์แจ้งเลื่อน 5 วัน", "จัดซื้อ",
+                DateTimeOffset.Parse("2026-07-15T00:00:00+07:00"), actorUserId,
+                DateTimeOffset.Parse("2026-07-08T09:00:00+07:00"));
+            context.IssueLogs.Add(issue);
+            await context.SaveChangesAsync();
+            issueId = issue.Id;
+        }
+
+        using (var context = CreateContext(tenantId, actorUserId, databaseName))
+        {
+            var tracked = await context.IssueLogs.SingleAsync(i => i.Id == issueId);
+            tracked.AdvanceStatus(DateTimeOffset.Parse("2026-07-09T10:00:00+07:00")); // Open -> Doing
+            await context.SaveChangesAsync();
+        }
+
+        using var verify = CreateContext(tenantId, actorUserId, databaseName);
+        var logs = await verify.AuditLogs.Where(l => l.EntityName == nameof(IssueLog)).ToListAsync();
+
+        Assert.Equal(2, logs.Count);
+        var createdLog = Assert.Single(logs, l => l.Action == AuditAction.Created);
+        Assert.Contains("\"Status\":1", createdLog.AfterJson); // IssueStatus.Open = 1
+
+        var updatedLog = Assert.Single(logs, l => l.Action == AuditAction.Updated);
+        Assert.Contains("\"Status\":1", updatedLog.BeforeJson); // was Open
+        Assert.Contains("\"Status\":2", updatedLog.AfterJson); // now Doing
     }
 }

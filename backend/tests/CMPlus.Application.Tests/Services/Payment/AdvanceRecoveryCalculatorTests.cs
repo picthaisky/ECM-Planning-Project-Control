@@ -116,6 +116,40 @@ public class AdvanceRecoveryCalculatorTests
         Assert.Equal(7_000_000.00m, result.Value); // 10,000,000.00 - 3,000,000.00 outstanding
     }
 
+    /// <summary>
+    /// S9-QA-01 mutation-testing gap closure: <see cref="ThresholdBanded_Forces_Full_Recovery_Once_Cumulative_Reaches_The_End_Threshold"/>
+    /// above uses P6's own s=10/rho=25/A=10,000,000.00 numbers, under which the ordinary
+    /// rho-of-excess formula always independently exceeds the outstanding-balance cap by the time
+    /// the end threshold could ever be reached (rho=25% reaches full recovery at G^cum=50,000,000.00,
+    /// which is before e=90% of C=90,000,000.00 for those parameters) - so deleting the forced-full-
+    /// recovery branch entirely (<see cref="AdvanceRecoveryCalculator"/>'s <c>ThresholdEndPct</c>
+    /// check) left every existing test green, including that one (verified empirically: a canary
+    /// mutation removing the branch passed all 24 CertificateCalculator/AdvanceRecoveryCalculator
+    /// tests unchanged). A slow recovery rate is required to actually exercise the branch: at
+    /// rho=5%, the ordinary formula alone would give only 2,500,000.00-1,000,000.00=1,500,000.00 here
+    /// (nowhere near the 10,000,000.00 outstanding-balance cap that would otherwise rescue the
+    /// assertion), so only the explicit forced-recovery branch can produce the correct 9,000,000.00.
+    /// </summary>
+    [Fact]
+    public void ThresholdBanded_End_Threshold_Forces_Recovery_Beyond_What_The_Ordinary_Rate_Formula_Alone_Would_Give()
+    {
+        var input = new AdvanceRecoveryInput(
+            AdvanceRecoveryMethod.ThresholdBanded, PeriodGrossAmount: 0m, AdvanceRatePercent: null,
+            AdvanceAmountPaid: 10_000_000.00m, AdvanceRecoveredCumulativeBefore: 1_000_000.00m,
+            ContractValue: 100_000_000.00m, ProjectCumulativeGrossCertifiedThisPeriod: 60_000_000.00m,
+            ThresholdStartPct: 10m, ThresholdRatePct: 5m, ThresholdEndPct: 50m, ManualAmount: null);
+
+        var result = AdvanceRecoveryCalculator.Compute(input);
+
+        Assert.True(result.IsSuccess, result.IsFailure ? result.Error : string.Empty);
+        // Ordinary rho-of-excess formula alone (no forced-recovery branch) would give only
+        // 5% * (60,000,000.00 - 10,000,000.00) - 1,000,000.00 = 1,500,000.00, well under the
+        // 10,000,000.00 - 1,000,000.00 = 9,000,000.00 outstanding-balance cap, so that cap cannot
+        // rescue an incorrect result here the way it does in the rho=25% fixture above.
+        Assert.Equal(9_000_000.00m, result.Value);
+        Assert.NotEqual(1_500_000.00m, result.Value);
+    }
+
     [Fact]
     public void ThresholdBanded_Blocks_When_Start_Or_Rate_Percent_Is_Not_Configured()
     {

@@ -1,4 +1,4 @@
-namespace CMPlus.Application.Features.Payment;
+﻿namespace CMPlus.Application.Features.Payment;
 
 /// <summary>
 /// Stable <see cref="CMPlus.Domain.Common.Result"/> error codes for the S9-BE-05 Payment
@@ -39,10 +39,21 @@ public static class PaymentApprovalErrorCodes
     /// <c>403 self-approval-not-permitted</c> (design.md §2.3) - the exact code fixture R10 exercises.</summary>
     public const string SelfApprovalNotPermitted = "PaymentCertificateSelfApprovalNotPermitted";
 
-    /// <summary>The actor already approved a different step of this same document revision
-    /// (approval-workflow.md §6.1: "a single user may not satisfy two steps of the same chain even
-    /// if they hold both roles - each step needs a distinct human"). Maps to 403.</summary>
-    public const string DuplicateChainApprover = "PaymentCertificateDuplicateChainApprover";
+    /// <summary>The actor already cast a vote - <c>Approve</c> <i>or</i> <c>Reject</c> - on a
+    /// different step of this same document revision (approval-workflow.md §6.1: "a single user may
+    /// not satisfy two steps of the same chain even if they hold both roles - each step needs a
+    /// distinct human"). Maps to 403.
+    /// <para><b>ADR-0016 (2026-08-10) / domain-rules.md §8.3:</b> renamed from
+    /// <c>DuplicateChainApprover</c> and widened from <c>Action == Approve</c> to
+    /// <c>Action ∈ {Approve, Reject}</c> - no actor may cast both an approval and a rejection on the
+    /// same revision, closing security review sprint-09.md N-05 (an actor who approved 1-of-2 could
+    /// then reject, terminating a <c>QuorumCount = 2</c> step alone). The predicate stays strictly
+    /// broader than either quorum count's own predicate (<c>Action == Approve</c> for approve-quorum,
+    /// <c>Action == Reject</c> for reject-quorum), so no actor can ever appear twice in either counted
+    /// set. <b>This is a wire-contract rename</b> - the string value changed from
+    /// <c>PaymentCertificateDuplicateChainApprover</c> - because <c>ProblemDetails.detail</c> is a
+    /// value the frontend pattern-matches on (<c>web/src/features/payment/api.ts</c>).</para></summary>
+    public const string DuplicateChainVoter = "PaymentCertificateDuplicateChainVoter";
 
     /// <summary>A concurrent writer already changed this exact certificate row
     /// (<c>PaymentCertificate.RowVersion</c> mismatch) between this request's load and its save.
@@ -60,4 +71,12 @@ public static class PaymentApprovalErrorCodes
     /// instead of an unrecoverable 500 (M-03's second half: "convert the throw into a mapped Result
     /// failure").</summary>
     public const string CorruptApprovalChain = "PaymentCertificateCorruptApprovalChain";
+
+    /// <summary>No authenticated user could be resolved for a request that must attribute an
+    /// append-only evidence row (S9 finding L-01, widened in Sprint 11). Unreachable behind
+    /// <c>[Authorize]</c>, but fabricating a <c>Guid.Empty</c> actor on a payment approval or a
+    /// ledger posting produces evidence that attributes a money-moving act to nobody — and it also
+    /// defeats the self-approval guard, since a real submitter id can never equal
+    /// <c>Guid.Empty</c>. Fail closed instead. Mirrors <c>VariationOrderErrorCodes.ActorRequired</c>.</summary>
+    public const string ActorRequired = "PaymentCertificateActorRequired";
 }

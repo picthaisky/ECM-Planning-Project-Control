@@ -10,8 +10,15 @@ namespace CMPlus.Domain.Entities;
 /// this makes "no path writes the cache/log directly" a structural guarantee, not just a
 /// convention, since Application/Infrastructure code outside this assembly cannot call
 /// <c>new ActivityProgressLog(...)</c> at all.
+///
+/// <para>The <see cref="IAppendOnly"/> marker closes the remaining half. An <c>internal</c>
+/// constructor stops anything <i>creating</i> a row improperly, but it says nothing about an
+/// ordinary <c>DbContext</c> rewriting or deleting one that already exists — precisely the gap
+/// Sprint 9's M-01 found (execution-verified on <c>ApprovalAction</c>, whose own comment likewise
+/// claimed append-only). This entity kept that gap until Sprint 11, when it was spotted while
+/// building `DailyWeatherLog` to the same pattern. The marker makes the guarantee structural.</para>
 /// </summary>
-public sealed class ActivityProgressLog : Entity, ITenantOwned
+public sealed class ActivityProgressLog : Entity, ITenantOwned, IAppendOnly
 {
     public Guid TenantId { get; private set; }
 

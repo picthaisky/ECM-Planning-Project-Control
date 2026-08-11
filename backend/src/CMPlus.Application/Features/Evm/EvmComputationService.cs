@@ -46,13 +46,18 @@ public sealed class EvmComputationService(IEvmDataReader dataReader, IActualCost
 
         var effectiveDataDate = dataDate ?? settings.ProjectDataDate;
 
+        // domain-rules.md §5.5(c): BAC(t), not a live scalar read - resolved only once the effective
+        // data date is known (it may itself come from settings.ProjectDataDate above), so this is a
+        // deliberate second reader call rather than something GetProjectSettingsAsync could supply.
+        var bac = await dataReader.GetBacAsOfAsync(projectId, effectiveDataDate, cancellationToken);
         var activityInputs = await dataReader.GetActivityInputsAsync(projectId, effectiveDataDate, cancellationToken);
         var actualCost = await actualCostReader.GetActualCostAsOfAsync(projectId, effectiveDataDate, cancellationToken);
 
         var ev = EvmEngine.ComputeEarnedValue(activityInputs);
         var pv = EvmEngine.ComputePlannedValue(activityInputs, effectiveDataDate);
-        var core = EvmEngine.Compute(settings.Bac, pv, ev, actualCost.Amount);
-        var eacResult = EacCalculator.ComputeAll(core, settings.EacCustomPerformanceFactor, settings.EacManualEtc);
+        var core = EvmEngine.Compute(bac, pv, ev, actualCost.Amount);
+        var eacResult = EacCalculator.ComputeAll(
+            core, settings.EacCustomPerformanceFactor, settings.EacManualEtc, settings.EacManualEtcStaleSince is not null);
 
         return new EvmComputation(settings, effectiveDataDate, core, eacResult, actualCost.EntryCount);
     }

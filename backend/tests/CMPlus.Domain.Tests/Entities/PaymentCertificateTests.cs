@@ -300,6 +300,13 @@ public class PaymentCertificateTests
         Assert.Equal(0, certificate.TotalSteps);
         Assert.Null(certificate.ApprovalPolicyId);
         Assert.Null(certificate.SubmittedByUserId);
+        // S9-QA-02 mutation-testing gap closure: TotalSteps==0 alone does not prove the child
+        // ApprovalSteps collection was actually cleared (verified empirically - a canary mutation
+        // that dropped only the `_approvalSteps.Clear()` call left every Domain-layer test green
+        // and was caught only by one Integration-layer DB-round-trip test). Asserting the collection
+        // itself here gives this guarantee independent, unit-level coverage rather than resting
+        // entirely on that single integration test.
+        Assert.Empty(certificate.ApprovalSteps);
 
         // Money fields are editable again (no partial carry-over, approval-workflow.md §6.3).
         ClaimFullPeriod(certificate, approvePct: 80.00m);
@@ -323,7 +330,7 @@ public class PaymentCertificateTests
         ClaimFullPeriod(certificate);
         certificate.Submit(Steps(1), Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
 
-        certificate.Reject(UserRole.QS, UserRole.QS);
+        certificate.Reject(UserRole.QS, UserRole.QS, DateTimeOffset.UtcNow);
 
         Assert.Equal(PaymentCertificateStatus.Rejected, certificate.Status);
     }
@@ -335,7 +342,7 @@ public class PaymentCertificateTests
         ClaimFullPeriod(certificate);
         certificate.Submit(Steps(2), Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
 
-        Assert.Throws<DomainException>(() => certificate.Reject(UserRole.QS, UserRole.QS));
+        Assert.Throws<DomainException>(() => certificate.Reject(UserRole.QS, UserRole.QS, DateTimeOffset.UtcNow));
     }
 
     [Fact]
@@ -345,7 +352,55 @@ public class PaymentCertificateTests
         ClaimFullPeriod(certificate);
         certificate.Submit(Steps(1), Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
 
-        Assert.Throws<DomainException>(() => certificate.Reject(UserRole.Site, UserRole.QS));
+        Assert.Throws<DomainException>(() => certificate.Reject(UserRole.Site, UserRole.QS, DateTimeOffset.UtcNow));
+    }
+
+    // ---- Reject quorum (ADR-0016 / domain-rules.md §8: "quorum binds rejection") ----
+
+    [Fact]
+    public void Reject_With_QuorumCount_One_Is_Unaffected_Terminates_Immediately_As_Before()
+    {
+        // QuorumCount=1 is the default and overwhelmingly common configuration - ADR-0016 requires
+        // this to be asserted by test, not assumed. Relies on rejectQuorumSatisfied's default of
+        // true, exactly mirroring Approve's quorumSatisfied default.
+        var certificate = CreateDraft();
+        ClaimFullPeriod(certificate);
+        certificate.Submit(Steps(1), Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        certificate.Reject(UserRole.QS, UserRole.QS, DateTimeOffset.UtcNow); // rejectQuorumSatisfied defaults to true
+
+        Assert.Equal(PaymentCertificateStatus.Rejected, certificate.Status);
+    }
+
+    [Fact]
+    public void Reject_With_QuorumCount_Two_Does_Not_Terminate_On_The_First_Vote_But_Still_Stamps_LastVoteAt()
+    {
+        var certificate = CreateDraft();
+        ClaimFullPeriod(certificate);
+        certificate.Submit(Steps(1), Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
+        var votedAt = DateTimeOffset.Parse("2026-08-10T09:00:00+07:00");
+
+        certificate.Reject(UserRole.QS, UserRole.QS, votedAt, rejectQuorumSatisfied: false);
+
+        // Still PendingApproval - the N-05 defect this fixes let one rejector terminate regardless.
+        Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status);
+        // N-03 parity (§8.2): LastVoteAt is stamped even on a non-advancing vote, so a concurrent
+        // second "first" rejector cannot silently co-commit against a stale read.
+        Assert.Equal(votedAt, certificate.LastVoteAt);
+    }
+
+    [Fact]
+    public void Reject_With_QuorumCount_Two_Terminates_Once_The_Second_Distinct_Rejector_Votes()
+    {
+        var certificate = CreateDraft();
+        ClaimFullPeriod(certificate);
+        certificate.Submit(Steps(1), Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        certificate.Reject(UserRole.QS, UserRole.QS, DateTimeOffset.UtcNow, rejectQuorumSatisfied: false);
+        Assert.Equal(PaymentCertificateStatus.PendingApproval, certificate.Status);
+
+        certificate.Reject(UserRole.QS, UserRole.QS, DateTimeOffset.UtcNow, rejectQuorumSatisfied: true);
+        Assert.Equal(PaymentCertificateStatus.Rejected, certificate.Status);
     }
 
     // ---- Withdraw ----
@@ -363,6 +418,7 @@ public class PaymentCertificateTests
         Assert.Equal(PaymentCertificateStatus.Draft, certificate.Status);
         Assert.Equal(1, certificate.RevisionNo); // Withdraw does not bump RevisionNo.
         Assert.Equal(0, certificate.TotalSteps);
+        Assert.Empty(certificate.ApprovalSteps); // see ReturnForRevision's sibling test for why this is asserted directly
     }
 
     [Fact]

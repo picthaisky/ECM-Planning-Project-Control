@@ -130,7 +130,8 @@ export function validateApprovalPolicyBands(rules: AmountBand[]): BandProblem[] 
  *
  * **This is a usability guard against a foot-gun, not a security control.** The engine now
  * genuinely enforces quorum (H-02 fix), which makes an over-large value *binding*: `ApprovePayment
- * CertificateCommandHandler`'s `DuplicateChainApprover` check caps the achievable quorum at the
+ * CertificateCommandHandler`'s `DuplicateChainVoter` check (ADR-0016; renamed from
+ * `DuplicateChainApprover`, now also blocking `Reject`) caps the achievable quorum at the
  * number of *distinct users holding that role in the tenant* — so `QuorumCount = 3` on a role held
  * by only two people permanently strands every certificate routed to that step in `PendingApproval`,
  * with its money fields frozen, and there is no `Withdraw`/`Cancel` endpoint wired up anywhere to

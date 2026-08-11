@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Application.Features.Projects;
 using CMPlus.Application.Features.Projects.Commands.SetEacVariantDefault;
 using CMPlus.Domain.Entities;
@@ -16,10 +16,12 @@ public class SetEacVariantDefaultCommandHandlerTests
         public Task<Project?> FindAsync(Guid projectId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ProjectToReturn);
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+        public bool NextSaveHitsConcurrencyConflict { get; set; }
+
+        public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
         {
             SaveChangesCallCount++;
-            return Task.CompletedTask;
+            return Task.FromResult(!NextSaveHitsConcurrencyConflict);
         }
     }
 

@@ -6,9 +6,14 @@ import { DashboardPage } from '../features/dashboard'
 import { EvmPage } from '../features/evm'
 import { GanttPage } from '../features/gantt'
 import { ProjectInfoPage } from '../features/info'
+import { IssuePage } from '../features/issue'
+import { ManeqPage } from '../features/maneq'
 import { PaymentPage } from '../features/payment'
+import { PhotoPage } from '../features/photo'
 import { TenantAdminPage } from '../features/tenant-admin'
+import { VoPage } from '../features/vo'
 import { WbsPage } from '../features/wbs'
+import { WeatherPage } from '../features/weather'
 import { useAuthStore } from '../store/authStore'
 import { useProjectStore } from '../store/projectStore'
 import { RequireAuth } from './RequireAuth'
@@ -17,9 +22,9 @@ import { ScreenPlaceholder } from './ScreenPlaceholder'
 import { SelectProjectPage } from './SelectProjectPage'
 
 /** Real content for the screens built so far (S4-FE-02/03, S6-FE-01/02/03, S7-FE-01..04,
- * S8-FE-01/02, S9-FE-01/02); every other nav entry is a `ScreenPlaceholder` until its own sprint
- * lands (S4-FE-01 DoD) — see `components/layout/navConfig.ts#IMPLEMENTED_SCREENS`, kept in sync
- * with this function. */
+ * S8-FE-01/02, S9-FE-01/02, S10-FE-01/02, S11-FE-01, S12-FE-01/02); every other nav entry is a
+ * `ScreenPlaceholder` until its own sprint lands (S4-FE-01 DoD) — see
+ * `components/layout/navConfig.ts#IMPLEMENTED_SCREENS`, kept in sync with this function. */
 function screenElement(id: (typeof NAV_ENTRIES)[number]['id'], label: string) {
   if (id === 'dashboard') return <DashboardPage />
   if (id === 'info') return <ProjectInfoPage />
@@ -28,6 +33,11 @@ function screenElement(id: (typeof NAV_ENTRIES)[number]['id'], label: string) {
   if (id === 'evm') return <EvmPage />
   if (id === 'cash') return <CashFlowPage />
   if (id === 'payment') return <PaymentPage />
+  if (id === 'photo') return <PhotoPage />
+  if (id === 'vo') return <VoPage />
+  if (id === 'weather') return <WeatherPage />
+  if (id === 'maneq') return <ManeqPage />
+  if (id === 'issue') return <IssuePage />
   return <ScreenPlaceholder title={label} />
 }
 

@@ -10,8 +10,9 @@ namespace CMPlus.Application.Tests.Features.Approval;
 /// <para>Why this bound matters, since a bare range check looks like boilerplate: before H-02 was
 /// fixed, <c>QuorumCount</c> was accepted and stored but never read, so an absurd value was inert.
 /// H-02's fix made the engine genuinely enforce it — which also made an over-large value
-/// <em>binding</em>. `DuplicateChainApprover` caps the achievable quorum at the number of distinct
-/// users holding the required role, so a quorum larger than that can never be satisfied: the
+/// <em>binding</em>. `DuplicateChainVoter` (ADR-0016; was `DuplicateChainApprover`) caps the
+/// achievable quorum at the number of distinct users holding the required role, so a quorum
+/// larger than that can never be satisfied: the
 /// certificate sits in <c>PendingApproval</c> permanently with its money fields frozen, and there
 /// is currently no withdraw/cancel endpoint to recover it. Fixing one finding created the
 /// conditions for another, which is exactly the kind of thing that needs a regression test rather

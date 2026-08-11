@@ -56,7 +56,7 @@ namespace CMPlus.Application.Services.Evm;
 /// </summary>
 public static class EacCalculator
 {
-    public static EacCalculationResult ComputeAll(EvmCoreResult core, decimal? customPf, decimal? manualEtc)
+    public static EacCalculationResult ComputeAll(EvmCoreResult core, decimal? customPf, decimal? manualEtc, bool manualEtcIsStale = false)
     {
         var bac = core.Bac;
         var ev = core.Ev;
@@ -78,6 +78,16 @@ public static class EacCalculator
         if (ac < 0m)
         {
             warnings.Add(EvmWarningCodes.ActualCostIsNegative);
+        }
+
+        // domain-rules.md §5.7's ⚠ rule: a VO has moved BAC since EacManualEtc was last entered
+        // (Project.EacManualEtcStaleSince is set). Guarded on manualEtc != null too - defensive only,
+        // since Project.SetEacManualEtc(null) always clears EacManualEtcStaleSince in the same call,
+        // so the two are never expected to disagree - but this keeps the warning meaningless only
+        // when BottomUpEtc could not be shown anyway, never emitted "dangling".
+        if (manualEtcIsStale && manualEtc is not null)
+        {
+            warnings.Add(EvmWarningCodes.ManualEtcPredatesBacChange);
         }
 
         IReadOnlyList<EacVariantResult> variants;

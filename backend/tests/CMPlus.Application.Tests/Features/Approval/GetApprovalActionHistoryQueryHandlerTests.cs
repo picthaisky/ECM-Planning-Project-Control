@@ -1,5 +1,6 @@
-using CMPlus.Application.Features.Approval.Queries.GetApprovalActionHistory;
+﻿using CMPlus.Application.Features.Approval.Queries.GetApprovalActionHistory;
 using CMPlus.Application.Tests.Features.Payment;
+using CMPlus.Application.Tests.Features.VariationOrder;
 using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
 
@@ -17,7 +18,7 @@ public class GetApprovalActionHistoryQueryHandlerTests
     [Fact]
     public async Task Returns_NotFound_For_A_PaymentCertificate_Id_That_Does_Not_Exist()
     {
-        var handler = new GetApprovalActionHistoryQueryHandler(new FakeApprovalActionRepository(), new FakePaymentCertificateRepository());
+        var handler = new GetApprovalActionHistoryQueryHandler(new FakeApprovalActionRepository(), new FakePaymentCertificateRepository(), new FakeVariationOrderRepository());
 
         var result = await handler.Handle(
             new GetApprovalActionHistoryQuery(ApprovalDocumentType.PaymentCertificate, Guid.NewGuid()), CancellationToken.None);
@@ -28,12 +29,17 @@ public class GetApprovalActionHistoryQueryHandlerTests
         Assert.Equal("PaymentCertificateNotFound", result.Error);
     }
 
+    /// <summary>
+    /// Sprint 10 landed the <c>VariationOrder</c> arm. This test previously asserted the *absence* of
+    /// that arm ("no such aggregate exists yet"), which is why it kept passing while the endpoint was
+    /// broken: the stale <c>_ =&gt; false</c> default returned an unconditional 404 that a
+    /// not-found assertion cannot distinguish from correct behaviour. It now asserts an unknown id
+    /// still 404s while a *real* VO resolves — the pair is what actually pins the arm.
+    /// </summary>
     [Fact]
-    public async Task Returns_NotFound_For_A_VariationOrder_Id_Because_No_Such_Aggregate_Exists_Yet()
+    public async Task Returns_NotFound_For_A_VariationOrder_Id_That_Does_Not_Exist()
     {
-        // ApprovalDocumentType.VariationOrder lands Sprint 10 (ADR-0008) - today, by definition, no
-        // such document exists to have a history. This must degrade to a correct 404, never a crash.
-        var handler = new GetApprovalActionHistoryQueryHandler(new FakeApprovalActionRepository(), new FakePaymentCertificateRepository());
+        var handler = new GetApprovalActionHistoryQueryHandler(new FakeApprovalActionRepository(), new FakePaymentCertificateRepository(), new FakeVariationOrderRepository());
 
         var result = await handler.Handle(
             new GetApprovalActionHistoryQuery(ApprovalDocumentType.VariationOrder, Guid.NewGuid()), CancellationToken.None);
@@ -49,7 +55,7 @@ public class GetApprovalActionHistoryQueryHandlerTests
         var certificate = new PaymentCertificate(Guid.NewGuid(), Guid.NewGuid(), 1, "IPC 1", 1_000_000m, 0m, Guid.NewGuid());
         certificateRepository.Seed(certificate);
 
-        var handler = new GetApprovalActionHistoryQueryHandler(new FakeApprovalActionRepository(), certificateRepository);
+        var handler = new GetApprovalActionHistoryQueryHandler(new FakeApprovalActionRepository(), certificateRepository, new FakeVariationOrderRepository());
         var result = await handler.Handle(
             new GetApprovalActionHistoryQuery(ApprovalDocumentType.PaymentCertificate, certificate.Id), CancellationToken.None);
 
@@ -77,7 +83,7 @@ public class GetApprovalActionHistoryQueryHandlerTests
         actionRepository.Add(submitAction);
         actionRepository.Add(approveAction);
 
-        var handler = new GetApprovalActionHistoryQueryHandler(actionRepository, certificateRepository);
+        var handler = new GetApprovalActionHistoryQueryHandler(actionRepository, certificateRepository, new FakeVariationOrderRepository());
         var result = await handler.Handle(
             new GetApprovalActionHistoryQuery(ApprovalDocumentType.PaymentCertificate, certificate.Id), CancellationToken.None);
 

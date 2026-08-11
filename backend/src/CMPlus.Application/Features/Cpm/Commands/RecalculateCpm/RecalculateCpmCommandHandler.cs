@@ -1,19 +1,31 @@
 using CMPlus.Application.Abstractions;
 using CMPlus.Application.Services.Cpm;
 using CMPlus.Domain.Common;
+using CMPlus.Domain.Entities;
 using MediatR;
 
 namespace CMPlus.Application.Features.Cpm.Commands.RecalculateCpm;
 
-public sealed class RecalculateCpmCommandHandler(ICpmScheduleRepository repository)
+public sealed class RecalculateCpmCommandHandler(
+    ICpmScheduleRepository repository, ITenantProvider tenantProvider, ICurrentUserContext currentUser, IDateTimeProvider clock)
     : IRequestHandler<RecalculateCpmCommand, Result<RecalculateCpmResultDto>>
 {
     public async Task<Result<RecalculateCpmResultDto>> Handle(
         RecalculateCpmCommand request, CancellationToken cancellationToken)
     {
-        if (!await repository.ProjectExistsAsync(request.ProjectId, cancellationToken))
+        var project = await repository.GetProjectContextAsync(request.ProjectId, cancellationToken);
+        if (project is null)
         {
             return Result<RecalculateCpmResultDto>.Failure(CpmErrorCodes.ProjectNotFound);
+        }
+
+        // ADR-0019: fail closed on a null actor - CpmRun.TriggeredByUserId must never be
+        // fabricated (same L-01 discipline as VariationOrder/DailyWeatherLog). Structurally
+        // unreachable behind [Authorize] in production, checked before anything else runs so a
+        // rejected request never even loads the schedule graph.
+        if (currentUser.UserId is not { } triggeredByUserId)
+        {
+            return Result<RecalculateCpmResultDto>.Failure(CpmErrorCodes.ActorRequired);
         }
 
         var graph = await repository.LoadScheduleGraphAsync(request.ProjectId, cancellationToken);
@@ -30,7 +42,8 @@ public sealed class RecalculateCpmCommandHandler(ICpmScheduleRepository reposito
         // A rejected graph (cycle/duplicate/unknown-activity relation) never mutates a single
         // Activity - the whole recalculation is all-or-nothing, same discipline as S4-BE-03's
         // batch progress all-or-nothing rule, just enforced by the engine running entirely before
-        // any write instead of a pre-check loop.
+        // any write instead of a pre-check loop. It also never captures a CpmRun (ADR-0019) - only
+        // a genuine, complete recalculation is history worth keeping.
         if (calculation.IsFailure)
         {
             return Result<RecalculateCpmResultDto>.Failure(calculation.Error);
@@ -50,7 +63,28 @@ public sealed class RecalculateCpmCommandHandler(ICpmScheduleRepository reposito
             .Select(a => new CpmActivityWriteBack(a.ActivityId, a.IsCritical, a.TotalFloat, a.FreeFloat))
             .ToList();
 
-        await repository.SaveResultsAsync(request.ProjectId, writeBacks, cancellationToken);
+        // ADR-0019: capture the append-only CpmRun snapshot from the SAME calculation the write-back
+        // above used - never a second CpmEngine.Calculate call, which could in principle disagree
+        // (it will not, CpmEngine is pure, but there is no reason to pay for or risk it).
+        var durationByActivityId = activityInputs.ToDictionary(a => a.ActivityId, a => a.DurationDays);
+        var cpmRun = CpmRun.Capture(
+            tenantProvider.TenantId,
+            request.ProjectId,
+            clock.UtcNow,
+            project.DataDate,
+            calculation.Value.ProjectDurationDays,
+            triggeredByUserId,
+            request.Trigger,
+            calculation.Value.Activities
+                .Select(a => new CpmRunActivityInput(
+                    a.ActivityId, durationByActivityId[a.ActivityId], a.EarlyStart, a.EarlyFinish, a.LateStart, a.LateFinish,
+                    a.TotalFloat, a.FreeFloat, a.IsCritical))
+                .ToList(),
+            relationInputs
+                .Select(r => new CpmRunRelationInput(r.PredecessorActivityId, r.SuccessorActivityId, r.RelationType, r.LagDays))
+                .ToList());
+
+        await repository.SaveResultsAsync(request.ProjectId, writeBacks, cpmRun, cancellationToken);
 
         var criticalActivityCount = calculation.Value.Activities.Count(a => a.IsCritical);
 
