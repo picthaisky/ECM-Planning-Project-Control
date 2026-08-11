@@ -54,7 +54,34 @@ export const NAV_ENTRIES: readonly NavEntry[] = [
   { id: 'baseline', path: 'baseline', label: 'Baseline' },
 ] as const
 
-/** Screens with a real, working implementation this sprint. Every other nav entry still routes
+/** Screens with a real, working implementation so far. Every other nav entry still routes
  * (S4-FE-01 DoD: "build the shell/routing structure now so later sprints just add screen
- * content") but renders `ScreenPlaceholder` until its own sprint lands. */
-export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set(['info', 'wbs'])
+ * content") but renders `ScreenPlaceholder` until its own sprint lands. `dashboard`/`cash` added
+ * S8-FE-01/02; `payment` added S9-FE-01/02 (the milestone list + certificate panel load against
+ * two endpoints that do not exist on the real backend yet — see `features/payment/api.ts`'s
+ * remarks — but every approval-chain mutation is real and live). `vo` added S10-FE-01/02 — the VO
+ * register, create/submit/approve chain, and content edit are all real, live endpoints (unlike
+ * Payment's own list/get gap); only the approval-action history read 404s today, for a different,
+ * narrower reason (`features/vo/api.ts#getVoApprovalActions`'s remarks). `weather`/`issue` added
+ * S11-FE-01 (US-11.1/US-11.2) — the weather-log register/correction-chain/EOT evaluation
+ * (`web/src/features/weather/`) and the issue/action log with its Open/Doing/Closed tile counts
+ * (`web/src/features/issue/`) are all real, live endpoints. `photo`/`maneq` added S12-FE-01/02
+ * (US-12.1/US-12.2) — offline photo capture + the IndexedDB outbox (`web/src/features/photo/`,
+ * `web/src/services/outbox/`) and the Man/Equipment KPI/histogram/PI screen
+ * (`web/src/features/maneq/`); both real, live endpoints, with the specific list/catalogue gaps on
+ * the Sprint 12 backend documented at each feature's own call sites (`features/photo/PhotoPage.tsx`,
+ * `features/maneq/ManeqPage.tsx`). */
+export const IMPLEMENTED_SCREENS: ReadonlySet<ScreenId> = new Set([
+  'dashboard',
+  'info',
+  'wbs',
+  'gantt',
+  'evm',
+  'cash',
+  'payment',
+  'photo',
+  'vo',
+  'weather',
+  'maneq',
+  'issue',
+])

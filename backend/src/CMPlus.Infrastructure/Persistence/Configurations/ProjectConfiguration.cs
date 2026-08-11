@@ -21,6 +21,24 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         // docs/db-conventions.md §3 / ADR-0007.
         builder.Property(p => p.BAC).HasPrecision(18, 2);
         builder.Property(p => p.ContractValue).HasPrecision(18, 2);
+        // ADR-0015 / sprint-10 security review H-02: the cumulative-VO-escalation baseline - NOT NULL
+        // (backfilled by migration; see Project.cs's own remarks on OriginalContractValue for why a
+        // nullable-with-a-fallback shape was a live defect, not a safe default).
+        builder.Property(p => p.OriginalContractValue).HasPrecision(18, 2);
+        // EscalationBaselineContractValue is a computed, get-only convenience property
+        // (a passthrough to OriginalContractValue) with no backing field - explicitly excluded rather
+        // than relying on EF Core's convention-based discovery to skip it correctly.
+        builder.Ignore(p => p.EscalationBaselineContractValue);
+        // domain-rules.md §5.5(c): BAC^orig, the BAC(t) reconstruction origin - same NOT NULL,
+        // backfilled-by-migration shape as OriginalContractValue immediately above (H-02).
+        builder.Property(p => p.OriginalBac).HasPrecision(18, 2);
+        // EffectiveOriginalBac is a computed, get-only convenience property (a passthrough to
+        // OriginalBac) with no backing field - same reason EscalationBaselineContractValue is ignored
+        // above.
+        builder.Ignore(p => p.EffectiveOriginalBac);
+        // Sprint-10 security review H-03: optimistic-concurrency token - see Project.RowVersion's own
+        // remarks. Same IsRowVersion() shape as VariationOrderConfiguration/PaymentCertificateConfiguration.
+        builder.Property(p => p.RowVersion).IsRowVersion();
         builder.Property(p => p.RetentionRate).HasPrecision(5, 2);
         builder.Property(p => p.AdvanceRate).HasPrecision(5, 2);
         builder.Property(p => p.RetentionCapPercentage).HasPrecision(5, 2);
@@ -43,6 +61,10 @@ public sealed class ProjectConfiguration : IEntityTypeConfiguration<Project>
         {
             tb.HasCheckConstraint("CK_Projects_BAC", "[BAC] >= 0");
             tb.HasCheckConstraint("CK_Projects_ContractValue", "[ContractValue] >= 0");
+            tb.HasCheckConstraint("CK_Projects_OriginalContractValue", "[OriginalContractValue] >= 0");
+            tb.HasCheckConstraint("CK_Projects_OriginalBac", "[OriginalBac] >= 0");
+            tb.HasCheckConstraint(
+                "CK_Projects_ApprovedVariationOrderCount", "[ApprovedVariationOrderCount] >= 0");
             tb.HasCheckConstraint("CK_Projects_RetentionRate", "[RetentionRate] BETWEEN 0 AND 100");
             tb.HasCheckConstraint("CK_Projects_AdvanceRate", "[AdvanceRate] BETWEEN 0 AND 100");
             tb.HasCheckConstraint("CK_Projects_RetentionCapPercentage", "[RetentionCapPercentage] BETWEEN 0 AND 100");

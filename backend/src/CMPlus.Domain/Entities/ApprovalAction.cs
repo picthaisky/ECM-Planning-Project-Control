@@ -12,7 +12,7 @@ namespace CMPlus.Domain.Entities;
 /// correction is a new compensating row, never an edit (verified structurally by
 /// <c>CMPlus.Domain.Tests</c>, not merely by convention).
 /// </summary>
-public sealed class ApprovalAction : Entity, ITenantOwned
+public sealed class ApprovalAction : Entity, ITenantOwned, IAppendOnly
 {
     public Guid TenantId { get; private set; }
 

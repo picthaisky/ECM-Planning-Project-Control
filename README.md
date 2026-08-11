@@ -13,16 +13,21 @@ documentation stay separate and easy to evolve.
 
 ```text
 .
-├── src/
-│   ├── CMPlus.Domain/         # Pure domain model: entities, value objects, enums, rules
-│   ├── CMPlus.Application/    # Use cases, CQRS handlers, abstractions, validators
-│   ├── CMPlus.Infrastructure/ # EF Core, persistence, external integrations, storage
-│   └── CMPlus.WebApi/         # API host, middleware, DI, controllers, auth
+├── backend/                   # .NET 10 solution (CMPlus.sln) — moved here post-Phase-0 to sit
+│   │                           # alongside web/ and infra/ as a proper top-level split
+│   ├── src/
+│   │   ├── CMPlus.Domain/         # Pure domain model: entities, value objects, enums, rules
+│   │   ├── CMPlus.Application/    # Use cases, CQRS handlers, abstractions, validators
+│   │   ├── CMPlus.Infrastructure/ # EF Core, persistence, external integrations, storage
+│   │   └── CMPlus.WebApi/         # API host, middleware, DI, controllers, auth
+│   └── tests/                     # xUnit: Domain / Application / Infrastructure / Architecture
 ├── web/                       # React 19 + TypeScript frontend
 │   ├── src/features/          # Module-based UI screens and feature slices
 │   └── public/                # Static assets and PWA files
 ├── infra/                     # Docker, local environment, and future IaC/deployment assets
-├── tests/                     # Unit, architecture, and integration test projects
+├── tests/                     # Cross-stack tooling only (perf scripts, shared dataset
+│                               # generators) — not backend- or frontend-owned; see
+│                               # docs/specs/master-plan/design.md §0
 ├── docs/                      # Product, architecture, design, and planning documents
 └── .claude/                   # AI team constitution, skills, and shared knowledge base
 ```
@@ -91,5 +96,24 @@ See `docs/8. สถาปัตยกรรม Multi AI Agents.md` for the full 
 
 ## Status
 
-Early stage — architecture, AI team, and UI prototype are defined; implementation of the
-.NET/React solution has not started yet.
+**Phase 0 (Setup) complete. Phase 1 (Foundation & Data Sync, Sprints 1–4) complete.** See
+`docs/10. แผนพัฒนารายเฟสโดยละเอียด (Detailed Phase Execution Plan).md` for the full sprint-by-sprint
+plan and `.claude/knowledge/architecture/decisions.md` for the ADRs governing what's built.
+
+Implemented so far: the Clean Architecture solution skeleton with tenant isolation and full CI
+(build/test/lint/vulnerability-scan/secret-scan); domain entities (`Project`, `WBSNode`,
+`Activity`, `ActivityRelation`, `ActivityProgressLog`, `Calendar`); JWT auth with a full
+amount-tiered approval-policy engine (ADR-0008); XER/MSPDI/Excel file import with security
+hardening (size caps, magic-byte checks, XXE/formula-injection/zip-bomb defenses); the WBS tree
+read API (verified P95 well under the 100 ms target at low-to-moderate concurrency — see
+`docs/perf/baseline.md` for a documented, still-open concurrency-scaling question); project-info
+editing; batch progress recording; and the frontend app shell, login, Project Info, and WBS &
+Activity screens, all built against the real running API (not mocks).
+
+**Not yet started:** Phase 2 (Sprint 5–8 — CPM engine, Gantt, EVM, Cash Flow, Dashboard), Phase 3
+(Sprint 9–12 — Payment Certificates, Variation Orders, Weather Log, Photo Progress, Man/Equipment),
+Phase 4 (Sprint 13–16 — offline-first PWA, Baseline module, full security hardening, deployment —
+cloud provider AWS vs Azure is a deliberately deferred decision, ADR-0010).
+
+Nothing has been committed to version control yet — all work described above exists in the
+working tree pending human review.

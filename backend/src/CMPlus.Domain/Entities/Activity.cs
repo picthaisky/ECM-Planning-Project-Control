@@ -31,6 +31,21 @@ public sealed class Activity : Entity, ITenantOwned
     public decimal BudgetCost { get; private set; }
 
     /// <summary>
+    /// domain-rules.md (manpower-equipment) §4.3/§5.4: <c>decimal(9,2)</c>, the estimator's labour
+    /// build-up (ราคากลาง / BoQ labour content) or an imported P6 <c>Budgeted Labor Units</c> -
+    /// Tier 1's required source of "budgeted man-hours" (BMH) for the Productivity Index.
+    /// <see langword="null"/> means <b>not estimated in hours</b> - never 0.00, and never seeded with
+    /// a placeholder (ADR-0015 discipline: a seeded default would be indistinguishable from a
+    /// decision once in production data). <b>Deriving this from <see cref="BudgetCost"/> ÷ an
+    /// assumed labour rate is forbidden</b> (§5.4 rule 4) - <see cref="BudgetCost"/> includes
+    /// material, plant, subcontract and prelims, so dividing it by a guessed rate would produce a
+    /// number with the shape of a budget and none of its meaning. Set only via
+    /// <see cref="SetBudgetManHours"/>, mirroring <see cref="BudgetCost"/>'s own non-negative
+    /// discipline.
+    /// </summary>
+    public decimal? BudgetManHours { get; private set; }
+
+    /// <summary>
     /// Denormalised cache (ADR-0009) of the <see cref="ActivityProgressLog"/> entry with the
     /// greatest <see cref="LatestProgressPeriodEndDate"/> recorded so far; a backdated correction
     /// is appended via <see cref="RecordProgress"/> but never moves this cache.
@@ -131,6 +146,25 @@ public sealed class Activity : Entity, ITenantOwned
         TotalFloat = totalFloat;
         FreeFloat = freeFloat;
     }
+
+    /// <summary>
+    /// S10-BE-03 (domain-rules.md §5.2): applies one <see cref="VariationOrderScopeItem.BudgetCostDelta"/>
+    /// line to this activity's budget. This - never a directly-assigned negative-budget activity - is
+    /// how a <c>Deduct</c> Variation Order is represented: <see cref="BudgetCost"/> stays
+    /// <see cref="MoneyGuard.EnsureNonNegative"/> at every step, so a delta large enough to drive an
+    /// individual activity's budget below zero throws here (the caller - <c>ApproveVariationOrderCommandHandler</c> -
+    /// is expected to have already pre-validated this per-activity, the same defense-in-depth
+    /// discipline every other domain guard in this codebase follows, so this is not the first place a
+    /// well-formed request would ever hit it).
+    /// </summary>
+    public void AdjustBudgetCost(decimal delta) =>
+        BudgetCost = MoneyGuard.EnsureNonNegative(BudgetCost + delta, nameof(BudgetCost));
+
+    /// <summary>domain-rules.md (manpower-equipment) §4.3. <see langword="null"/> clears the
+    /// estimate back to "not estimated in hours" - distinct from setting it to 0.00, which is a
+    /// deliberate "no labour budgeted here" decision (§5.7(f), fixture M-06f).</summary>
+    public void SetBudgetManHours(decimal? budgetManHours) =>
+        BudgetManHours = MoneyGuard.EnsureNonNegative(budgetManHours, nameof(BudgetManHours));
 
     private static string ValidateCode(string activityCode) =>
         string.IsNullOrWhiteSpace(activityCode)

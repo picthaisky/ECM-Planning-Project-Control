@@ -76,6 +76,32 @@ public class ApprovalPolicyTests
     }
 
     [Fact]
+    public void CreateInitialVersion_Rejects_Two_Rules_That_Genuinely_Share_A_StepNo_Over_An_Overlapping_Amount_Range()
+    {
+        // security review sprint-09.md M-03: unlike CreateInitialVersion_Rejects_Overlapping_Bands_For_The_Same_StepNo
+        // above (which despite its name uses two DIFFERENT StepNos), this is the actual M-03 shape -
+        // two DIFFERENT rules sharing the SAME StepNo, both covering the amount 400,000.00. Routing an
+        // amount in [300000,500000) against this policy would previously resolve BOTH rules (since
+        // AssertContiguousStepsAt's .Distinct() silently collapsed them to one StepNo for the
+        // save-time check), producing a chain with two entries at StepNo 1 - exactly the "resolved
+        // steps: [1,1]" data corruption the review proved with ApprovalPolicySeeder-style direct
+        // construction (probe 8). Constructed directly via CreateInitialVersion (not through
+        // UpdateApprovalPolicyCommandHandler's own additive FindOverlappingStepNo pre-check) so this
+        // proves the invariant lives on the aggregate itself and protects every construction path,
+        // including ApprovalPolicySeeder, which calls CreateInitialVersion directly.
+        var overlappingSameStep = new List<ApprovalPolicyRuleInput>
+        {
+            new(1, 0.00m, 500_000.00m, UserRole.PM),
+            new(1, 300_000.00m, 600_000.00m, UserRole.QS),
+        };
+
+        var ex = Assert.Throws<DomainException>(() => ApprovalPolicy.CreateInitialVersion(
+            Guid.NewGuid(), null, ApprovalDocumentType.VariationOrder, DateTimeOffset.UtcNow, overlappingSameStep));
+
+        Assert.Contains("StepNo 1", ex.Message);
+    }
+
+    [Fact]
     public void CreateInitialVersion_Rejects_Empty_Rule_List()
     {
         Assert.Throws<DomainException>(() => ApprovalPolicy.CreateInitialVersion(

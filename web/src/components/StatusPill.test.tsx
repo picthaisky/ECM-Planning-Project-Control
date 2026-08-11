@@ -21,6 +21,15 @@ describe('StatusPill', () => {
     expect(resolveStatusTone('Pending')).toBe('warning')
   })
 
+  it('derives tone for PaymentCertificateStatus (S9-FE-01/02)', () => {
+    expect(resolveStatusTone('PendingApproval')).toBe('warning')
+    expect(resolveStatusTone('Certified')).toBe('success')
+    expect(resolveStatusTone('Paid')).toBe('success')
+    // NotDue/Draft/Cancelled fall back to the default neutral tone (no explicit table entry).
+    expect(resolveStatusTone('NotDue')).toBe('neutral')
+    expect(resolveStatusTone('Cancelled')).toBe('neutral')
+  })
+
   it('unknown status falls back to the neutral tone', () => {
     render(<StatusPill label="Draft" status="draft" />)
     expect(screen.getByText('Draft').className).toMatch(/text-text-muted/)

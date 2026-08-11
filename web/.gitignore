@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Playwright (S6-QA-01/02) - generated run artifacts, never committed; only e2e/**/*.spec.ts and
+# e2e/visual/**/*.png (checked-in visual baselines) are source-controlled.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

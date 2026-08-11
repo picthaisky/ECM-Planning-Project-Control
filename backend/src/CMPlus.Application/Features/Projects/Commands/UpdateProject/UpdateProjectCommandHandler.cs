@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Domain.Common;
 using MediatR;
 
@@ -27,6 +27,19 @@ public sealed class UpdateProjectCommandHandler(IProjectRepository repository)
         project.SetCode(request.Code);
         project.SetOwner(request.Owner);
         project.SetContractDates(request.ContractStart, request.ContractFinish);
+
+        // ADR-0017: BAC is derived (OriginalBac + approved VOs) once any VO is approved, so a direct
+        // edit is refused. Checked here rather than relying on the aggregate's own guard purely so
+        // the caller gets a specific, actionable error code - a DomainException would surface as the
+        // generic "The request violates a domain rule" 400, which tells a PM nothing about why their
+        // budget edit was rejected or what to do instead. The Domain guard stays as defense in depth.
+        // Only a *changed* BAC is blocked: re-submitting the whole form unchanged must still succeed,
+        // since this is a full-representation PUT and every other field remains editable.
+        if (request.Bac != project.BAC && project.ApprovedVariationOrderCount > 0)
+        {
+            return Result<ProjectDto>.Failure(ProjectErrorCodes.BacLockedByApprovedVariationOrders);
+        }
+
         project.SetBac(request.Bac);
         project.SetContractValue(request.ContractValue);
         project.SetRetentionRate(request.RetentionRate);
@@ -46,7 +59,11 @@ public sealed class UpdateProjectCommandHandler(IProjectRepository repository)
         // (S4-BE-02 DoD: "a successful edit writes an AuditLog entry with old/new values") with no
         // extra code needed - verified in UpdateProjectCommandHandlerTests /
         // AuditSaveChangesInterceptorTests, not merely assumed.
-        await repository.SaveChangesAsync(cancellationToken);
+        if (!await repository.TrySaveChangesAsync(cancellationToken))
+        {
+            return Result<ProjectDto>.Failure(ProjectErrorCodes.ConcurrencyConflict);
+        }
+
 
         return Result<ProjectDto>.Success(ProjectDto.From(project));
     }

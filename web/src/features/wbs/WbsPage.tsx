@@ -2,10 +2,12 @@ import { useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Button } from '../../components'
 import { RequireRole } from '../../routes'
+import { CriticalPathPreview } from './components/CriticalPathPreview'
 import { searchWbsTree } from './flattenTree'
 import { ProgressUpdatePanel } from './ProgressUpdatePanel'
 import { useBatchProgressForm } from './useBatchProgressForm'
 import { useNodeActivities } from './useNodeActivities'
+import { useRecalculateCpm } from './useRecalculateCpm'
 import { useWbsTree } from './useWbsTree'
 import { WbsTreeGrid } from './WbsTreeGrid'
 
@@ -13,6 +15,12 @@ import { WbsTreeGrid } from './WbsTreeGrid'
  * `[Authorize(Roles = "PM,Planning,Site,QS,Admin")]` exactly (viewing the WBS tree itself has no
  * role restriction on the backend, so only the "โหมดอัปเดตความคืบหน้า" toggle is gated). */
 const PROGRESS_UPDATE_ROLES = ['PM', 'Planning', 'Site', 'QS', 'Admin'] as const
+
+/** Roles allowed to trigger a CPM recalculation — mirrors `CpmController`'s own
+ * `[Authorize(Roles = "PM,Planning,Admin")]` exactly (S5-BE-04: scheduling recalculation is a
+ * planning operation, not one Site/QS/Executive ever trigger). This is a UX gate only — the
+ * backend re-checks the role independently on every request regardless of what renders here. */
+const CPM_RECALCULATE_ROLES = ['PM', 'Planning', 'Admin'] as const
 
 /**
  * S4-FE-03 "WBS & Activity" screen (US-4.1, US-4.5): the real, virtualized WBS tree
@@ -25,6 +33,7 @@ export function WbsPage() {
   const tree = useWbsTree(projectId ?? '')
   const nodeActivities = useNodeActivities()
   const batchForm = useBatchProgressForm(projectId ?? '')
+  const cpm = useRecalculateCpm(projectId ?? '')
   const [mode, setMode] = useState<'view' | 'update-progress'>('view')
   const [search, setSearch] = useState('')
 
@@ -68,6 +77,10 @@ export function WbsPage() {
           </Button>
         </RequireRole>
       </div>
+
+      <RequireRole allowedRoles={[...CPM_RECALCULATE_ROLES]}>
+        <CriticalPathPreview cpm={cpm} />
+      </RequireRole>
 
       <WbsTreeGrid
         rows={displayRows}

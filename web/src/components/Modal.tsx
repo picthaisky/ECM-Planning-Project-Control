@@ -33,6 +33,25 @@ export function Modal({ isOpen, onClose, title, children, footer, className }: M
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const titleId = useId()
 
+  /**
+   * Holds the latest `onClose` without being a dependency of the focus-management effect below.
+   *
+   * Why this matters: many callers construct `onClose` as a fresh closure on every render (e.g. a
+   * "reset local form state, then close" wrapper defined in the modal's own body — a completely
+   * ordinary pattern, not a caller bug to work around by asking every consumer to `useCallback` it).
+   * If `onClose` were a dependency of the effect below, then a modal whose *own* body holds editable
+   * form state (almost all of them) would re-run that effect on every keystroke — and the effect
+   * unconditionally moves focus to the first focusable element on setup. The visible symptom is
+   * catastrophic: typing a second character into any field yanks focus away, so only ever the first
+   * character of anything typed actually lands. Keeping `onClose` out of the dependency array (via
+   * this ref, always current) means the effect only ever runs on a genuine `isOpen` transition, which
+   * is the only time "move focus into the dialog" should happen at all.
+   */
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  })
+
   useEffect(() => {
     if (!isOpen) return undefined
 
@@ -51,7 +70,7 @@ export function Modal({ isOpen, onClose, title, children, footer, className }: M
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        onClose()
+        onCloseRef.current()
         return
       }
       if (event.key !== 'Tab' || !panelRef.current) return
@@ -82,7 +101,10 @@ export function Modal({ isOpen, onClose, title, children, footer, className }: M
       document.body.style.overflow = previousOverflow
       previousFocusRef.current?.focus()
     }
-  }, [isOpen, onClose])
+    // onClose is intentionally not a dependency — it is read via onCloseRef above (see that ref's
+    // own remarks); the project's react-hooks/exhaustive-deps configuration does not flag ref reads,
+    // so no lint-disable is needed here, but the omission is still worth calling out explicitly.
+  }, [isOpen])
 
   if (!isOpen) return null
 

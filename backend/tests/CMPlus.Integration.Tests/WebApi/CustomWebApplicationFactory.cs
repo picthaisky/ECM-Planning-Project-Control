@@ -27,6 +27,14 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
 
     private readonly string _databaseName = Guid.NewGuid().ToString();
 
+    /// <summary>S12-BE-01: <see cref="Infrastructure.Storage.LocalDiskFileStorage"/> needs no
+    /// container/external service (plain local disk, ADR-0010's dev adapter), so photo upload/serve
+    /// tests can run for real end-to-end even without Docker - unlike the DB substitution above,
+    /// this is not a test double, it is the actual production adapter pointed at a throwaway,
+    /// per-factory-instance directory so parallel test runs cannot collide or leak into each other
+    /// (mirrors <see cref="_databaseName"/>'s identical per-instance-uniqueness rationale).</summary>
+    public string PhotoStorageRootPath { get; } = Path.Combine(Path.GetTempPath(), "cmplus-test-storage", Guid.NewGuid().ToString());
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureAppConfiguration((_, configBuilder) =>
@@ -37,6 +45,7 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["Jwt:Issuer"] = JwtIssuerForTests,
                 ["Jwt:Audience"] = JwtAudienceForTests,
                 ["Jwt:ExpiryMinutes"] = "60",
+                ["Storage:LocalRootPath"] = PhotoStorageRootPath,
             });
         });
 
@@ -72,5 +81,22 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
         var options = new DbContextOptionsBuilder<CmPlusDbContext>().UseInMemoryDatabase(_databaseName).Options;
         await using var context = new CmPlusDbContext(options, tenantContext);
         return await DevDataSeeder.SeedAsync(context, tenantContext, new Pbkdf2PasswordHasher());
+    }
+
+    /// <summary>
+    /// A directly-constructed <see cref="CmPlusDbContext"/> against this same factory's InMemory
+    /// database, bound to a fixed <paramref name="tenantId"/> - the same "own <see cref="SeedTenantContext"/>,
+    /// never the DI-registered <c>HttpContextTenantProvider</c>" pattern <see cref="SeedAsync"/>
+    /// already uses. Needed for WebApi-level tests of an aggregate with no HTTP "create" endpoint
+    /// (e.g. <c>PaymentCertificate</c> - S9-BE-05 only builds the approval-chain transitions, not a
+    /// creation endpoint) - <c>DbContext</c> resolved from <see cref="WebApplicationFactory{TEntryPoint}.Services"/>
+    /// instead would use the real, HTTP-context-bound <c>ITenantProvider</c>, which throws outside
+    /// an authenticated request (by design, see that type's remarks).
+    /// </summary>
+    public CmPlusDbContext CreateDbContextForSeeding(Guid tenantId)
+    {
+        var tenantContext = new SeedTenantContext { TenantId = tenantId };
+        var options = new DbContextOptionsBuilder<CmPlusDbContext>().UseInMemoryDatabase(_databaseName).Options;
+        return new CmPlusDbContext(options, tenantContext);
     }
 }

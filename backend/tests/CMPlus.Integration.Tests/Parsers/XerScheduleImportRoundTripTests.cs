@@ -30,6 +30,8 @@ public class XerScheduleImportRoundTripTests
     private sealed class FixedCurrentUser(Guid userId) : ICurrentUserContext
     {
         public Guid? UserId { get; } = userId;
+
+        public UserRole Role => UserRole.PM;
     }
 
     private sealed class UnlimitedImportOptions : IImportOptionsProvider

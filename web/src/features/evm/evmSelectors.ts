@@ -1,0 +1,151 @@
+import type {
+  EacNullReason,
+  EacVariant,
+  EacVariantResponseDto,
+  EvmResponseDto,
+  EvmSnapshotDto,
+  SCurvePoint,
+} from './types'
+
+/**
+ * ADR-0007(d): the engine computes all five EAC variants; the Sprint 7 UI surfaces only these
+ * three (index-based) variants, in this fixed display order. `BottomUpEtc`/`CustomPf` are
+ * deliberately excluded — their input UI (a persisted manual ETC / custom performance factor) lands
+ * in Sprint 14. Every component that renders a *choosable* variant list must build it from this
+ * constant rather than iterating `EvmResponseDto.variants` directly, so "only 3 in v1" lives in one
+ * place, not re-decided ad hoc at each call site.
+ */
+export const UI_EAC_VARIANTS: readonly EacVariant[] = ['CpiBased', 'Atypical', 'CpiSpiBased']
+
+/** Short tile/option label per variant (technical terms kept in English per CLAUDE.md). */
+export const VARIANT_SHORT_LABELS: Record<EacVariant, string> = {
+  CpiBased: 'CPI-Based',
+  Atypical: 'Atypical',
+  CpiSpiBased: 'CPI × SPI',
+  BottomUpEtc: 'Bottom-Up ETC',
+  CustomPf: 'Custom PF',
+}
+
+/** "When to use" hint, transcribed from evm-formulas.md's own "Assumption — when to use" column. */
+export const VARIANT_ASSUMPTION_LABELS: Record<EacVariant, string> = {
+  CpiBased: 'อัตราต้นทุนปัจจุบันเป็นปกติและจะดำเนินต่อไปในลักษณะเดิม',
+  Atypical: 'ผลต่างที่ผ่านมาเป็นเหตุการณ์ครั้งเดียว มีสาเหตุชัดเจน ไม่เกิดซ้ำ',
+  CpiSpiBased: 'ความล่าช้าของตารางเวลาเองก็เป็นตัวขับต้นทุนงานที่เหลือ (เร่งงาน/OT)',
+  BottomUpEtc: 'มีการประมาณการงานที่เหลือใหม่ (พร้อมใช้งาน Sprint 14)',
+  CustomPf: 'กำหนดตัวคูณผลการดำเนินงานเอง (พร้อมใช้งาน Sprint 14)',
+}
+
+/** Formula caption per variant, shown under the EAC tile so the currently-selected assumption is
+ * always spelled out (matches the prototype's per-tile formula sub-line convention). */
+export const VARIANT_FORMULA_LABELS: Record<EacVariant, string> = {
+  CpiBased: 'BAC / CPI',
+  Atypical: 'AC + (BAC − EV)',
+  CpiSpiBased: 'AC + (BAC − EV) / (CPI × SPI)',
+  BottomUpEtc: 'AC + ETC (ประมาณการเอง)',
+  CustomPf: 'AC + PF × (BAC − EV)',
+}
+
+/** Thai translation of every `EacNullReason` the backend can return — surfaced next to a
+ * non-computable variant so the UI is honest about *why*, using the backend's own reason code
+ * rather than the frontend re-deriving/guessing one (never duplicate the edge-case rules from
+ * `evm-formulas.md` — only translate the code it already returns). */
+export const EAC_NULL_REASON_LABELS: Record<EacNullReason, string> = {
+  NotStarted: 'โครงการยังไม่เริ่มดำเนินการ — PV, EV และ AC ยังเป็น 0 ทั้งหมด',
+  NoActualCost: 'ยังไม่มีข้อมูลค่าใช้จ่ายจริง (Actual Cost) ของโครงการนี้',
+  NoPlannedValue: 'โครงการนี้ยังไม่มีเส้นฐาน (Baseline) จึงไม่มีมูลค่าตามแผน (PV)',
+  ZeroCpi: 'มีค่าใช้จ่ายจริงเกิดขึ้นแล้วแต่ยังไม่มีผลงานที่ทำได้ (EV) จึงคำนวณ CPI ไม่ได้',
+  ManualEtcNotSet: 'ยังไม่ได้กรอกประมาณการงานที่เหลือ (Bottom-Up ETC) — พร้อมใช้งานใน Sprint 14',
+  CustomPfNotSet: 'ยังไม่ได้กำหนดตัวคูณผลการดำเนินงานเอง (Custom Performance Factor) — พร้อมใช้งานใน Sprint 14',
+}
+
+/**
+ * S7-FE-04 (ADR-0009): assembles `SCurveChart`'s `points` array — every closed
+ * `EvmPeriodSnapshot` strictly *before* the live data date, ascending, followed by the live
+ * `GET .../evm` reading as the last point. `snapshots` need not already be sorted/filtered by the
+ * caller (defensive: `listEvmSnapshots` documents ascending order, but this never trusts that
+ * blindly for a correctness-critical chart).
+ *
+ * A snapshot dated on/after the live data date is deliberately excluded, not merely de-duplicated —
+ * if a period was somehow closed for a date at or beyond the project's own current data date, the
+ * live reading is definitionally the more current source for that same instant, and the whole
+ * point of ADR-0009 is that *past* dates must cite a frozen snapshot, not that every snapshot ever
+ * closed must be plotted regardless of whether it is actually in the past.
+ */
+export function buildSCurvePoints(evm: Pick<EvmResponseDto, 'dataDate' | 'pv' | 'ev' | 'ac'>, snapshots: readonly EvmSnapshotDto[]): SCurvePoint[] {
+  const currentTime = new Date(evm.dataDate).getTime()
+
+  const historical = snapshots
+    .filter((snapshot) => new Date(snapshot.dataDate).getTime() < currentTime)
+    .slice()
+    .sort((a, b) => new Date(a.dataDate).getTime() - new Date(b.dataDate).getTime())
+    .map((snapshot) => ({ dataDate: snapshot.dataDate, pv: snapshot.pv, ev: snapshot.ev, ac: snapshot.ac }))
+
+  return [...historical, { dataDate: evm.dataDate, pv: evm.pv, ev: evm.ev, ac: evm.ac }]
+}
+
+/** Finds one variant's result entry in an `EvmResponseDto.variants[]` array. `undefined` should
+ * not occur in practice for any of `UI_EAC_VARIANTS` (the engine always returns all 5), but every
+ * caller still treats it as optional — never assume the array shape defensively skipped here. */
+export function findVariantResult(
+  evm: Pick<EvmResponseDto, 'variants'>,
+  variant: EacVariant,
+): EacVariantResponseDto | undefined {
+  return evm.variants.find((entry) => entry.variant === variant)
+}
+
+/**
+ * evm-formulas.md "TCPI follows the selected variant": show `TCPI_BAC` while the forecast is still
+ * within budget, switch to `TCPI_EAC` once the *currently selected* variant's own VAC has gone
+ * negative (`VAC = BAC - EAC`, so `VAC < 0` means the forecast has overrun). Falls back to
+ * `TCPI_BAC` whenever VAC is unknown/non-negative/`tcpiEac` itself is null — this never recomputes
+ * TCPI itself, it only picks which of the two backend-computed fields to surface (domain-rules.md:
+ * mirror the backend's own numbers, never a different formula on the frontend).
+ */
+export function resolveTcpi(
+  evm: Pick<EvmResponseDto, 'tcpiBac' | 'tcpiEac'>,
+  selectedVariantResult: EacVariantResponseDto | undefined,
+): { value: string | null; basis: 'BAC' | 'EAC' } {
+  const vac = selectedVariantResult?.vac ?? null
+  const vacNumber = vac === null ? null : Number(vac)
+  const forecastHasOverrun = vacNumber !== null && Number.isFinite(vacNumber) && vacNumber < 0
+
+  if (forecastHasOverrun && evm.tcpiEac !== null) {
+    return { value: evm.tcpiEac, basis: 'EAC' }
+  }
+  return { value: evm.tcpiBac, basis: 'BAC' }
+}
+
+export type MetricTone = 'neutral' | 'success' | 'danger' | 'gold'
+
+function parseOrNull(value: string | null): number | null {
+  if (value === null) return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+/**
+ * `value >= 0` -> favourable (success/green); `< 0` -> unfavourable (danger/red); `null` -> neutral.
+ *
+ * This is the *only* colour rule this module applies to an EAC-variant-derived number (used for
+ * VAC), and it is deliberately derived from that one already-selected variant's own value, never
+ * from a comparison across variants or from `variant` identity — see `EvmMetricsGrid.tsx`'s remarks
+ * on why BAC/EAC/ETC stay neutral and VAC is the only dynamically-coloured one of the four tiles
+ * S7-FE-02's DoD names. This is the actual fix for the ADR-0007 "ordering reverses when CPI > 1"
+ * trap (domain-decisions.md §1.5): a rule of the shape "colour tile X red because variant Y is
+ * usually the pessimistic one" is what the trap warns against; a rule of the shape "colour this
+ * number red because it is negative" is safe under any ordering, because it never looks at which
+ * variant produced the number.
+ */
+export function toneForSign(value: string | null): MetricTone {
+  const parsed = parseOrNull(value)
+  if (parsed === null) return 'neutral'
+  return parsed >= 0 ? 'success' : 'danger'
+}
+
+/** `value >= threshold` -> favourable; `< threshold` -> unfavourable; `null` -> neutral. Used for
+ * SPI/CPI (threshold 1) — these are never variant-dependent, so no ordering trap applies. */
+export function toneForRatioThreshold(value: string | null, threshold = 1): MetricTone {
+  const parsed = parseOrNull(value)
+  if (parsed === null) return 'neutral'
+  return parsed >= threshold ? 'success' : 'danger'
+}

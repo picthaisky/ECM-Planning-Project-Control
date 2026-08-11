@@ -64,6 +64,13 @@ public class TenantApprovalPoliciesControllerTests : IClassFixture<CustomWebAppl
         Assert.NotNull(policy);
         Assert.Equal(1, policy!.Version);
         Assert.True(policy.IsActive);
+        // ADR-0015 (human-confirmed 2026-08-10: "Threshold default 10.00%") / sprint-10 security
+        // review M-03: CumulativeVoEscalationPct is seeded 10.00, not NULL. domain-rules.md §4.5's
+        // "PENDING - no default set" predates the human's answer and is superseded by the ADR.
+        // Seeding NULL past that point left cumulative-VO escalation switched OFF in every tenant with
+        // no signal distinguishing "deliberately disabled" from "provisioning never turned it on" -
+        // execution-verified in the review: a project 41.9% varied approved another VO with no
+        // Executive signature anywhere.
         Assert.Equal(10.00m, policy.CumulativeVoEscalationPct);
         Assert.Equal("Executive", policy.CumulativeVoEscalationRole);
         Assert.Equal(6, policy.Rules.Count);
@@ -118,5 +125,94 @@ public class TenantApprovalPoliciesControllerTests : IClassFixture<CustomWebAppl
         var response = await client.GetAsync($"/api/v1/tenants/{pm.TenantId}/approval-policies?documentType=VariationOrder");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    // ------------------------------------------------------------------------------------
+    // S9-BE-06: PUT .../approval-policies/{documentType} - write API, Admin-only, creates
+    // Version+1 and deactivates the previous version.
+    // ------------------------------------------------------------------------------------
+
+    [Fact]
+    public async Task Admin_Put_Creates_Version_2_And_The_Subsequent_Get_Reflects_It()
+    {
+        using var client = _factory.CreateClient();
+        var admin = await LoginAsync(client, "admin@siam-construction.dev");
+        Authorize(client, admin.AccessToken);
+
+        var putResponse = await client.PutAsJsonAsync(
+            $"/api/v1/tenants/{admin.TenantId}/approval-policies/VariationOrder",
+            new
+            {
+                AllowSelfApproval = true,
+                CumulativeVoEscalationPct = 15.00m,
+                CumulativeVoEscalationRole = "Executive",
+                Rules = new[] { new { StepNo = 1, MinAmount = 0.00m, MaxAmount = (decimal?)null, RequiredRole = "PM", QuorumCount = 1 } },
+            });
+
+        Assert.Equal(HttpStatusCode.OK, putResponse.StatusCode);
+        var putBody = await putResponse.Content.ReadFromJsonAsync<ApprovalPolicyResponse>(ResponseJsonOptions);
+        Assert.Equal(2, putBody!.Version); // TH-Default-VO seeded as v1 - this edit is v2, never an in-place edit
+        Assert.True(putBody.AllowSelfApproval);
+
+        var getResponse = await client.GetAsync($"/api/v1/tenants/{admin.TenantId}/approval-policies?documentType=VariationOrder");
+        var getBody = await getResponse.Content.ReadFromJsonAsync<ApprovalPolicyResponse>(ResponseJsonOptions);
+        Assert.Equal(2, getBody!.Version);
+        Assert.True(getBody.IsActive);
+        Assert.Single(getBody.Rules);
+    }
+
+    [Fact]
+    public async Task NonAdmin_Role_Is_Forbidden_From_Writing_A_Policy()
+    {
+        using var client = _factory.CreateClient();
+        var pm = await LoginAsync(client, "pm@siam-construction.dev");
+        Authorize(client, pm.AccessToken);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/tenants/{pm.TenantId}/approval-policies/VariationOrder",
+            new { AllowSelfApproval = false, Rules = new[] { new { StepNo = 1, MinAmount = 0.00m, MaxAmount = (decimal?)null, RequiredRole = "PM" } } });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Admin_Put_With_A_Gapped_Band_Returns_400_Identifying_The_Offending_StepNo()
+    {
+        using var client = _factory.CreateClient();
+        var admin = await LoginAsync(client, "admin@bkk-infra.dev");
+        Authorize(client, admin.AccessToken);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/tenants/{admin.TenantId}/approval-policies/VariationOrder",
+            new
+            {
+                AllowSelfApproval = false,
+                Rules = new[]
+                {
+                    new { StepNo = 1, MinAmount = 0.00m, MaxAmount = (decimal?)500_000.00m, RequiredRole = "PM" },
+                    new { StepNo = 1, MinAmount = 500_000.00m, MaxAmount = (decimal?)5_000_000.00m, RequiredRole = "PM" },
+                    new { StepNo = 3, MinAmount = 500_000.00m, MaxAmount = (decimal?)5_000_000.00m, RequiredRole = "Executive" },
+                },
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"invalidStepNo\":2", body);
+        Assert.Contains("\"problem\":\"BandGap\"", body);
+    }
+
+    [Fact]
+    public async Task Cross_Tenant_Put_Returns_A_Bare_404()
+    {
+        using var client = _factory.CreateClient();
+        var adminOfTenantA = await LoginAsync(client, "admin@siam-construction.dev");
+        var adminOfTenantB = await LoginAsync(client, "admin@bkk-infra.dev");
+        Authorize(client, adminOfTenantA.AccessToken);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/tenants/{adminOfTenantB.TenantId}/approval-policies/VariationOrder",
+            new { AllowSelfApproval = false, Rules = new[] { new { StepNo = 1, MinAmount = 0.00m, MaxAmount = (decimal?)null, RequiredRole = "PM" } } });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }

@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Application.Features.Projects;
 using CMPlus.Application.Features.Projects.Commands.UpdateProject;
 using CMPlus.Domain.Common;
@@ -17,10 +17,12 @@ public class UpdateProjectCommandHandlerTests
         public Task<Project?> FindAsync(Guid projectId, CancellationToken cancellationToken = default) =>
             Task.FromResult(ProjectToReturn);
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+        public bool NextSaveHitsConcurrencyConflict { get; set; }
+
+        public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
         {
             SaveChangesCallCount++;
-            return Task.CompletedTask;
+            return Task.FromResult(!NextSaveHitsConcurrencyConflict);
         }
     }
 
@@ -130,7 +132,73 @@ public class UpdateProjectCommandHandlerTests
         var result = await handler.Handle(ValidCommand(project.Id), CancellationToken.None);
 
         Assert.True(result.IsSuccess);
-        // IProjectRepository has exactly two members (FindAsync, SaveChangesAsync) - both already
+        // IProjectRepository has exactly two members (FindAsync, TrySaveChangesAsync) - both already
         // exercised above - and neither can reach any other repository/aggregate.
+    }
+
+    /// <summary>
+    /// ADR-0017. The Domain guard on <c>Project.SetBac</c> is defense in depth, but on its own it
+    /// surfaces as <c>GlobalExceptionHandler</c>'s generic 400 "The request violates a domain rule",
+    /// which tells a PM nothing about why their budget edit was rejected. The handler must return the
+    /// specific code so the caller learns the budget is derived and what to do instead.
+    /// </summary>
+    [Fact]
+    public async Task Editing_Bac_Is_Refused_With_A_Specific_Code_Once_A_Vo_Has_Been_Approved()
+    {
+        var project = CreateProject();
+        project.ApplyVariationOrderApproval(250_000.00m, DateTimeOffset.UtcNow);
+        var repository = new FakeProjectRepository { ProjectToReturn = project };
+        var handler = new UpdateProjectCommandHandler(repository);
+
+        // ValidCommand carries a Bac that differs from the project's current value.
+        var result = await handler.Handle(ValidCommand(project.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ProjectErrorCodes.BacLockedByApprovedVariationOrders, result.Error);
+        Assert.Equal(0, repository.SaveChangesCallCount); // nothing partially applied
+    }
+
+    /// <summary>
+    /// The lock must not make the whole project un-editable: `UpdateProjectCommand` is a
+    /// full-representation PUT, so an unchanged BAC arrives on every edit of any other field.
+    /// </summary>
+    [Fact]
+    public async Task Editing_Other_Fields_Still_Works_After_A_Vo_When_Bac_Is_Resubmitted_Unchanged()
+    {
+        var project = CreateProject();
+        project.ApplyVariationOrderApproval(250_000.00m, DateTimeOffset.UtcNow);
+        var repository = new FakeProjectRepository { ProjectToReturn = project };
+        var handler = new UpdateProjectCommandHandler(repository);
+        var command = ValidCommand(project.Id) with { Bac = project.BAC };
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Updated Name", project.Name);
+        Assert.Equal(1, repository.SaveChangesCallCount);
+    }
+
+    /// <summary>
+    /// Reachable only since <c>Project.RowVersion</c> was added for S10-SEC-01 finding H-03. Before
+    /// the token existed a concurrent edit silently lost one write; the naive fix would have let the
+    /// resulting <c>DbUpdateConcurrencyException</c> escape as a 500. Neither is acceptable on an
+    /// ordinary project edit, so the conflict must surface as a mapped 409.
+    /// </summary>
+    [Fact]
+    public async Task A_Concurrent_Edit_Returns_A_Conflict_Result_Rather_Than_Throwing_Or_Silently_Losing_The_Write()
+    {
+        var project = CreateProject();
+        var repository = new FakeProjectRepository
+        {
+            ProjectToReturn = project,
+            NextSaveHitsConcurrencyConflict = true,
+        };
+        var handler = new UpdateProjectCommandHandler(repository);
+
+        var result = await handler.Handle(ValidCommand(project.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ProjectErrorCodes.ConcurrencyConflict, result.Error);
+        Assert.Equal(1, repository.SaveChangesCallCount);
     }
 }

@@ -25,6 +25,8 @@ public class UpdateProjectCommandHandlerIntegrationTests
     private sealed class FixedCurrentUserContext(Guid? userId) : ICurrentUserContext
     {
         public Guid? UserId { get; } = userId;
+
+        public UserRole Role => UserRole.PM;
     }
 
     private static CmPlusDbContext CreateContext(Guid tenantId, Guid? actorUserId, string databaseName)

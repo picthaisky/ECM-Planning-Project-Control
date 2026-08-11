@@ -35,4 +35,15 @@ public sealed class ApprovalPolicyReader(CmPlusDbContext dbContext) : IApprovalP
             .OrderByDescending(p => p.Version)
             .FirstOrDefaultAsync(cancellationToken);
     }
+
+    public async Task<ApprovalPolicy?> GetByIdAsync(Guid approvalPolicyId, CancellationToken cancellationToken = default)
+    {
+        // Deliberately no IsActive/EffectiveTo filter (unlike the two methods above) - this is the
+        // version-pinning lookup (S9-BE-05): a document keeps referencing this exact row long after
+        // a S9-BE-06 edit has deactivated it, and Deactivate() never deletes the row.
+        return await dbContext.ApprovalPolicies
+            .AsNoTracking()
+            .Include(p => p.Rules)
+            .FirstOrDefaultAsync(p => p.Id == approvalPolicyId, cancellationToken);
+    }
 }

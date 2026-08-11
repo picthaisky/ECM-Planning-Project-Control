@@ -227,6 +227,247 @@ public class TenantIsolationTests
                 [new FileImportJob(
                     tenantId, Guid.NewGuid(), "schedule.xer", ImportFileFormat.Xer,
                     createdByUserId: Guid.NewGuid(), startedAt: DateTimeOffset.UtcNow)]),
+
+            [typeof(EvmPeriodSnapshot)] = tenantId => new EntityFixture(
+                [new EvmPeriodSnapshot(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow,
+                    bac: 1_000_000.00m, pv: 400_000.00m, ev: 300_000.00m, ac: 350_000.00m,
+                    eacVariant: EacVariant.CpiBased, performanceFactor: 1.166667m, eac: 1_166_666.67m,
+                    etc: 816_666.67m, vac: -166_666.67m, createdAt: DateTimeOffset.UtcNow, createdByUserId: Guid.NewGuid())]),
+
+            // actual-cost.md §9 (ADR-0013) - registered here per this file's own S1-QA-01 DoD
+            // comment: a new ITenantOwned entity must never silently fall outside isolation
+            // coverage.
+            [typeof(ActualCostEntry)] = tenantId => new EntityFixture(
+                [new ActualCostEntry(
+                    tenantId, Guid.NewGuid(), wbsNodeId: null, activityId: null,
+                    CostCategory.Material, ActualCostEntryType.Actual, ActualCostSource.ManualEntry,
+                    amount: 1_000.00m, incurredDate: DateTimeOffset.UtcNow, postedAt: DateTimeOffset.UtcNow,
+                    postedByUserId: Guid.NewGuid(), reversesEntryId: null, documentReference: null,
+                    costCode: null, vendorName: null, note: null, fileImportJobId: null, paidDate: null,
+                    quantity: null, unitOfMeasure: null)]),
+
+            // payment-retention.md / S9-BE-01 - registered here per this file's own S1-QA-01 DoD
+            // comment: a new ITenantOwned entity must never silently fall outside isolation coverage.
+            [typeof(PaymentCertificate)] = tenantId => new EntityFixture(
+                [new PaymentCertificate(
+                    tenantId, Guid.NewGuid(), milestoneNo: 1, "Period 1", milestoneValue: 1_000_000.00m,
+                    previousCumulativeApprovePct: 0m, createdByUserId: Guid.NewGuid())]),
+
+            // Security review sprint-09.md H-01 fix - registered here per this file's own S1-QA-01
+            // DoD comment: a new ITenantOwned entity must never silently fall outside isolation
+            // coverage. PaymentCertificate owns its ApprovalSteps rows (backing-field navigation) -
+            // listing both explicitly here mirrors the ApprovalPolicy/ApprovalPolicyRule fixture
+            // above; Add()-ing the certificate alone would cascade the steps in anyway, but being
+            // explicit keeps this fixture self-documenting for the PaymentCertificateApprovalStep
+            // theory case specifically.
+            [typeof(PaymentCertificateApprovalStep)] = tenantId =>
+            {
+                var certificate = new PaymentCertificate(
+                    tenantId, Guid.NewGuid(), milestoneNo: 1, "Period 1", milestoneValue: 1_000_000.00m,
+                    previousCumulativeApprovePct: 0m, createdByUserId: Guid.NewGuid());
+                certificate.SetPeriodClaim(100m, null, null, 1_000_000.00m, 0m, 0m, 1_000_000.00m);
+                certificate.Submit(
+                    [new PaymentCertificateApprovalStepInput(1, UserRole.QS, 1)],
+                    Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
+                return new EntityFixture([certificate, .. certificate.ApprovalSteps]);
+            },
+
+            // payment-retention.md §4 / S9-BE-04 - same reason as PaymentCertificate above.
+            [typeof(ProjectFinanceLedger)] = tenantId => new EntityFixture(
+                [ProjectFinanceLedger.CreateRetentionAccrual(
+                    tenantId, Guid.NewGuid(), Guid.NewGuid(), 1_000.00m, DateTimeOffset.UtcNow)]),
+
+            // domain-rules.md §2 / S10-BE-01 - registered here per this file's own S1-QA-01 DoD
+            // comment: a new ITenantOwned entity must never silently fall outside isolation coverage.
+            [typeof(VariationOrder)] = tenantId => new EntityFixture(
+                [new VariationOrder(
+                    tenantId, Guid.NewGuid(), $"VO-{Guid.NewGuid():N}", Guid.NewGuid(),
+                    amount: 100_000.00m, description: "VO", justification: null, timeImpactDays: 0,
+                    scopeItems: [new VariationOrderScopeItemInput(Guid.NewGuid(), 100_000.00m)])]),
+
+            // VariationOrder owns its ScopeItems rows (backing-field navigation) - listing both
+            // explicitly here mirrors the CalendarException/ApprovalPolicy fixtures above.
+            [typeof(VariationOrderScopeItem)] = tenantId =>
+            {
+                var variationOrder = new VariationOrder(
+                    tenantId, Guid.NewGuid(), $"VO-{Guid.NewGuid():N}", Guid.NewGuid(),
+                    amount: 100_000.00m, description: "VO", justification: null, timeImpactDays: 0,
+                    scopeItems: [new VariationOrderScopeItemInput(Guid.NewGuid(), 100_000.00m)]);
+                return new EntityFixture([variationOrder, .. variationOrder.ScopeItems]);
+            },
+
+            // Security review sprint-09.md H-01 fix, reused for the VO (domain-rules.md §2.1) -
+            // registered here for the same reason PaymentCertificateApprovalStep is above.
+            // VariationOrder owns its ApprovalSteps rows (backing-field navigation).
+            [typeof(VariationOrderApprovalStep)] = tenantId =>
+            {
+                var variationOrder = new VariationOrder(
+                    tenantId, Guid.NewGuid(), $"VO-{Guid.NewGuid():N}", Guid.NewGuid(),
+                    amount: 100_000.00m, description: "VO", justification: null, timeImpactDays: 0,
+                    scopeItems: [new VariationOrderScopeItemInput(Guid.NewGuid(), 100_000.00m)]);
+                variationOrder.Submit(
+                    [new VariationOrderApprovalStepInput(1, UserRole.PM, 1)],
+                    Guid.NewGuid(), 1, false, Guid.NewGuid(), DateTimeOffset.UtcNow);
+                return new EntityFixture([variationOrder, .. variationOrder.ApprovalSteps]);
+            },
+
+            // S11-BE-01 (US-11.1) - registered here per this file's own S1-QA-01 DoD comment: a new
+            // ITenantOwned entity must never silently fall outside isolation test coverage.
+            [typeof(DailyWeatherLog)] = tenantId => new EntityFixture(
+                [DailyWeatherLog.CreateOriginal(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, WeatherCondition.HeavyRain, "ฝนตกหนัก", 42.5m,
+                    WeatherImpact.FullStoppage, "หยุดเทคอนกรีตโซน B ครึ่งวัน", 8.00m, Guid.NewGuid(),
+                    DateTimeOffset.UtcNow, [])]),
+
+            // DailyWeatherLog owns its AffectedActivities rows (backing-field navigation) - listing
+            // both explicitly here mirrors the CalendarException/VariationOrderScopeItem fixtures
+            // above. The referenced ActivityId is a bare Guid with no real Activity row behind it -
+            // same established pattern VariationOrderScopeItem's own fixture already uses (the EF
+            // Core InMemory provider used by TestDbContextFactory does not enforce FK constraints).
+            [typeof(DailyWeatherLogActivity)] = tenantId =>
+            {
+                var log = DailyWeatherLog.CreateOriginal(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, WeatherCondition.HeavyRain, "ฝนตกหนัก", 42.5m,
+                    WeatherImpact.FullStoppage, "หยุดเทคอนกรีตโซน B ครึ่งวัน", 8.00m, Guid.NewGuid(),
+                    DateTimeOffset.UtcNow, [Guid.NewGuid()]);
+                return new EntityFixture([log, .. log.AffectedActivities]);
+            },
+
+            // S11-BE-03 (US-11.2) - same reason as DailyWeatherLog above.
+            [typeof(IssueLog)] = tenantId => new EntityFixture(
+                [new IssueLog(
+                    tenantId, Guid.NewGuid(), "เหล็กเส้น DB25 ส่งช้า", "ซัพพลายเออร์แจ้งเลื่อน 5 วัน", "จัดซื้อ",
+                    DateTimeOffset.UtcNow, Guid.NewGuid(), DateTimeOffset.UtcNow)]),
+
+            // ADR-0019 (domain-rules.md weather-eot §4.3) - registered here per this file's own
+            // S1-QA-01 DoD comment: a new ITenantOwned entity must never silently fall outside
+            // isolation test coverage. No children for the CpmRun theory case itself - mirrors
+            // DailyWeatherLog's own fixture above (an empty child collection is enough to prove the
+            // parent row's own tenant isolation; the child theory cases below cover the children).
+            [typeof(CpmRun)] = tenantId => new EntityFixture(
+                [CpmRun.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, projectDurationDays: 10,
+                    Guid.NewGuid(), CpmRunTrigger.Manual, [], [])]),
+
+            // CpmRun owns its Activities/Relations rows (backing-field navigations) - listing the
+            // run and its children explicitly here mirrors the DailyWeatherLog/DailyWeatherLogActivity
+            // fixtures above.
+            [typeof(CpmRunActivity)] = tenantId =>
+            {
+                var activityId = Guid.NewGuid();
+                var run = CpmRun.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, projectDurationDays: 10,
+                    Guid.NewGuid(), CpmRunTrigger.Manual,
+                    [new CpmRunActivityInput(activityId, 5, 0, 5, 0, 5, TotalFloat: 0, FreeFloat: 0, IsCritical: true)], []);
+                return new EntityFixture([run, .. run.Activities]);
+            },
+
+            [typeof(CpmRunRelation)] = tenantId =>
+            {
+                var predecessorId = Guid.NewGuid();
+                var successorId = Guid.NewGuid();
+                var run = CpmRun.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, projectDurationDays: 10,
+                    Guid.NewGuid(), CpmRunTrigger.Manual,
+                    [
+                        new CpmRunActivityInput(predecessorId, 5, 0, 5, 0, 5, 0, 0, true),
+                        new CpmRunActivityInput(successorId, 3, 5, 8, 5, 8, 0, 0, true),
+                    ],
+                    [new CpmRunRelationInput(predecessorId, successorId, RelationType.FS, LagDays: 0)]);
+                return new EntityFixture([run, .. run.Relations]);
+            },
+
+            // S11-BE-02 (domain-rules.md weather-eot) - registered here per this file's own
+            // S1-QA-01 DoD comment: a new ITenantOwned entity must never silently fall outside
+            // isolation test coverage.
+            [typeof(ProjectEotPolicy)] = tenantId => new EntityFixture(
+                [new ProjectEotPolicy(tenantId, Guid.NewGuid())]),
+
+            // No children for the EotEvaluation theory case itself - mirrors CpmRun's own fixture
+            // above (an empty child collection is enough to prove the parent row's own tenant
+            // isolation; the child theory cases below cover the children).
+            [typeof(EotEvaluation)] = tenantId => new EntityFixture(
+                [EotEvaluation.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                    Guid.NewGuid(), EotCriticalityBasis.Contemporaneous, EotConfidence.Substantiated,
+                    asScheduledDurationDays: 10, impactedDurationDays: 10, eotEligibleDays: 0,
+                    countableStoppageDayCount: 0, serialChainAbsorbedDayCount: 0, distinctCountableDateCount: 0,
+                    unattributedStoppageDayCount: 0,
+                    policySnapshotJson: "{}", latestNoticeDate: null, noticeWindowExpired: null, runs: [], sources: [],
+                    drivers: [])]),
+
+            // EotEvaluation owns its Runs/Sources/Drivers rows (backing-field navigations) - listing
+            // the evaluation and each child explicitly here mirrors CpmRun/CpmRunActivity's identical
+            // pattern.
+            [typeof(EotEvaluationRun)] = tenantId =>
+            {
+                var evaluation = EotEvaluation.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                    Guid.NewGuid(), EotCriticalityBasis.Contemporaneous, EotConfidence.Substantiated,
+                    asScheduledDurationDays: 10, impactedDurationDays: 11, eotEligibleDays: 1,
+                    countableStoppageDayCount: 1, serialChainAbsorbedDayCount: 0, distinctCountableDateCount: 1,
+                    unattributedStoppageDayCount: 0,
+                    policySnapshotJson: "{}", latestNoticeDate: null, noticeWindowExpired: null,
+                    runs: [new EotEvaluationRunInput(Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 10, 11, 1)],
+                    sources: [], drivers: []);
+                return new EntityFixture([evaluation, .. evaluation.Runs]);
+            },
+
+            [typeof(EotEvaluationSource)] = tenantId =>
+            {
+                var evaluation = EotEvaluation.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                    Guid.NewGuid(), EotCriticalityBasis.Contemporaneous, EotConfidence.Substantiated,
+                    asScheduledDurationDays: 10, impactedDurationDays: 10, eotEligibleDays: 0,
+                    countableStoppageDayCount: 0, serialChainAbsorbedDayCount: 0, distinctCountableDateCount: 0,
+                    unattributedStoppageDayCount: 0,
+                    policySnapshotJson: "{}", latestNoticeDate: null, noticeWindowExpired: null, runs: [],
+                    sources: [new EotEvaluationSourceInput(Guid.NewGuid(), 1.00m, null)], drivers: []);
+                return new EntityFixture([evaluation, .. evaluation.Sources]);
+            },
+
+            [typeof(EotEvaluationDriver)] = tenantId =>
+            {
+                var evaluation = EotEvaluation.Capture(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                    Guid.NewGuid(), EotCriticalityBasis.Contemporaneous, EotConfidence.Substantiated,
+                    asScheduledDurationDays: 10, impactedDurationDays: 11, eotEligibleDays: 1,
+                    countableStoppageDayCount: 1, serialChainAbsorbedDayCount: 0, distinctCountableDateCount: 1,
+                    unattributedStoppageDayCount: 0,
+                    policySnapshotJson: "{}", latestNoticeDate: null, noticeWindowExpired: null, runs: [], sources: [],
+                    drivers: [new EotEvaluationDriverInput(
+                        Guid.NewGuid(), Guid.NewGuid(), "C", "Activity C", StoppageDays: 1, TotalFloatAtRun: 0,
+                        WasCriticalAtRun: true, IsOnImpactedCriticalPath: true, IndicativeEotDays: 1, MarginalEotDays: 1,
+                        RemainingFloatAfter: 0, UnclaimedFractionalHours: null)]);
+                return new EntityFixture([evaluation, .. evaluation.Drivers]);
+            },
+
+            // S12-BE-01 (US-12.1) - registered here per this file's own S1-QA-01 DoD comment: a new
+            // ITenantOwned entity must never silently fall outside isolation test coverage.
+            [typeof(Photo)] = tenantId => new EntityFixture(
+                [new Photo(
+                    tenantId, Guid.NewGuid(), null, "โซน B", PhotoImageFormat.Jpeg, 1_024,
+                    Guid.NewGuid(), DateTimeOffset.UtcNow, null)]),
+
+            // S12-BE-02 (US-12.2, domain-rules.md manpower-equipment §4.3) - registered here per
+            // this file's own S1-QA-01 DoD comment: a new ITenantOwned entity must never silently
+            // fall outside isolation test coverage.
+            [typeof(WorkCategory)] = tenantId => new EntityFixture(
+                [new WorkCategory(tenantId, null, $"C{Guid.NewGuid():N}"[..8], "งานโครงสร้าง", "Structure", 1)]),
+
+            // §4.7 - the append-only site log.
+            [typeof(ManpowerEquipmentLog)] = tenantId => new EntityFixture(
+                [ManpowerEquipmentLog.CreateOriginal(
+                    tenantId, Guid.NewGuid(), DateTimeOffset.UtcNow, Shift.Day, Guid.NewGuid(), Guid.NewGuid(), null,
+                    LabourType.OwnDirect, null, 25, 200.00m, 0m, false, 0, 0m, 0m, "งานโครงสร้าง", null,
+                    Guid.NewGuid(), DateTimeOffset.UtcNow, allowDuplicateOverride: false)]),
+
+            // §4.6(a) - the editable, audited manning plan.
+            [typeof(ManpowerPlan)] = tenantId => new EntityFixture(
+                [new ManpowerPlan(
+                    tenantId, Guid.NewGuid(), null, Guid.NewGuid(), DateTimeOffset.UtcNow,
+                    DateTimeOffset.UtcNow.AddDays(7), plannedWorkerCount: 20, plannedManHours: 160.00m)]),
         };
 
     /// <summary>

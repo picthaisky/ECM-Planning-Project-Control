@@ -14,6 +14,7 @@ vi.mock('./api', async () => {
     getWbsTree: vi.fn(),
     getNodeActivities: vi.fn(),
     batchRecordProgress: vi.fn(),
+    recalculateCpm: vi.fn(),
   }
 })
 
@@ -69,6 +70,7 @@ describe('WbsPage (S4-FE-03 integration)', () => {
     vi.mocked(api.getWbsTree).mockReset()
     vi.mocked(api.getNodeActivities).mockReset()
     vi.mocked(api.batchRecordProgress).mockReset()
+    vi.mocked(api.recalculateCpm).mockReset()
     useAuthStore.getState().logout()
   })
 
@@ -78,6 +80,54 @@ describe('WbsPage (S4-FE-03 integration)', () => {
     renderPage('Executive')
     await waitFor(() => expect(screen.getByText('งานโครงสร้าง')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'โหมดอัปเดตความคืบหน้า' })).not.toBeInTheDocument()
+    // S5-FE-01: same role gate as CpmController's own [Authorize(Roles = "PM,Planning,Admin")] —
+    // Executive can view the WBS tree but must not see the recalculate action at all.
+    expect(screen.queryByRole('button', { name: 'คำนวณ CPM ใหม่' })).not.toBeInTheDocument()
+  })
+
+  it('S5-FE-01: an allowed role (PM) can trigger a real CPM recalculation and sees the critical path preview in schedule order', async () => {
+    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.recalculateCpm).mockResolvedValueOnce({
+      activitiesProcessed: 4,
+      criticalActivityCount: 3,
+      projectDurationDays: 15,
+      criticalPath: ['activity-a', 'activity-c', 'activity-d'],
+    })
+    const user = userEvent.setup()
+
+    renderPage('PM')
+    await waitFor(() => expect(screen.getByText('งานโครงสร้าง')).toBeInTheDocument())
+
+    const recalcButton = screen.getByRole('button', { name: 'คำนวณ CPM ใหม่' })
+    await user.click(recalcButton)
+
+    expect(api.recalculateCpm).toHaveBeenCalledWith('project-1')
+    await waitFor(() => expect(screen.getByText('คำนวณสำเร็จ')).toBeInTheDocument())
+
+    const listItems = screen.getAllByRole('listitem')
+    expect(listItems.map((li) => li.textContent)).toEqual([
+      expect.stringContaining('activity-a'),
+      expect.stringContaining('activity-c'),
+      expect.stringContaining('activity-d'),
+    ])
+  })
+
+  it('S5-FE-01: a rejected recalculation (e.g. a detected relation cycle) shows a clear failure state, not a silent no-op', async () => {
+    vi.mocked(api.getWbsTree).mockResolvedValue(sampleTree)
+    vi.mocked(api.recalculateCpm).mockRejectedValueOnce(
+      new api.WbsApiError(
+        'พบการอ้างอิงกิจกรรมแบบวนซ้ำ (Cycle) ไม่สามารถคำนวณตารางเวลาได้ (เส้นทางวนซ้ำ: A → B → A)',
+        422,
+      ),
+    )
+    const user = userEvent.setup()
+
+    renderPage('PM')
+    await waitFor(() => expect(screen.getByText('งานโครงสร้าง')).toBeInTheDocument())
+    await user.click(screen.getByRole('button', { name: 'คำนวณ CPM ใหม่' }))
+
+    await waitFor(() => expect(screen.getByText('คำนวณไม่สำเร็จ')).toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('วนซ้ำ')
   })
 
   it('full flow: enter update-progress mode, pick a node\'s activities, edit a value below current, confirm the decrease, and submit the real batch call', async () => {

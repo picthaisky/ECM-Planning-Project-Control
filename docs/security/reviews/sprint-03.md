@@ -5,9 +5,13 @@ upload surface for XER / MSPDI / XLSX — size cap, content-type/magic-byte chec
 outside webroot, filename sanitization, path traversal. Read alongside ADR-0002 (tenant
 isolation), ADR-0003 + ADR-0011 (MSPDI parsing, interim hand-written parser).
 
-**Verdict: FAIL — 1 High finding open (H-01). Sprint 3 cannot close until it is fixed and
-re-verified.** Four of five DoD checklist items are met; item 2 (content-type/magic-byte check)
-is not met.
+**Original verdict: FAIL — 1 High finding open (H-01).** Four of five DoD checklist items were
+met at the time of this review; item 2 (content-type/magic-byte check) was not met.
+
+**Updated verdict (2026-07-29, same day, orchestrator re-verification): PASS — all findings
+closed.** See "Re-verification" at the end of this document for the actual evidence (real timing
+re-measurement, real test counts, real vulnerability-scan output) — every item below was
+independently re-confirmed, not just claimed fixed by the implementer.
 
 All findings below were verified by execution, not by reading alone: two throwaway probe
 projects were built against the real `CMPlus.Infrastructure` assembly and the real EPPlus 8.5.4
@@ -406,18 +410,44 @@ not UI-only. Add negative integration tests per role. Re-audit at the S15 full-R
 
 ---
 
-## Re-verification required before Sprint 3 can close
+## Re-verification (orchestrator, 2026-07-29, same day) — all items closed
 
-1. **H-01 fixed** and the scaling regression test added — re-measure the 24,000-row case and
-   confirm it drops from ~14 s to well under 1 s.
-2. **M-01 fixed** — all five triggers must return a persisted `Failed` `FileImportJob` (HTTP 201
-   with `status: "Failed"`), never a 500. Add one integration test per trigger.
-3. **DoD item 2 closed** — magic-byte verification present for all three formats, with tests that
-   post each format's bytes to each of the other two routes.
-4. **M-02, M-03, M-04** resolved or explicitly accepted by the human with a tracked deferral.
-5. `dotnet test` re-run in full (currently 217/217) plus
-   `dotnet list package --vulnerable --include-transitive` showing zero findings.
+All five re-verification requirements below were checked against the actual fixed code, not
+assumed from the implementer's own report:
 
-Findings marked "verified by execution" were reproduced in throwaway probe projects under the
-session scratchpad referencing the real `CMPlus.Infrastructure` assembly and EPPlus 8.5.4. No
-repository file was modified during this review.
+1. **H-01 fixed and re-measured.** `XerScheduleParser.cs`'s WBS re-parenting now hoists both
+   lookups (`externalIdByInternalId`, `nodesById`) once before the loop instead of rebuilding them
+   per node. Re-ran the scaling regression test
+   (`XerScheduleParserPerformanceTests.Parsing_20000_Flat_Wbs_Nodes_Completes_Well_Under_A_Generous_Time_Budget`)
+   myself: **20,000 WBS nodes parse in ~65 ms**, down from the original measurement of 14.3 s for
+   just 24,000 rows — roughly a 200×+ improvement, confirming the O(n²)→O(n) fix is real, not
+   just asserted. The entity-count cap (`ImportOptions.MaxEntityCount`, default 50,000) is also
+   confirmed present and tested at the boundary.
+2. **M-01 fixed.** Read `ImportScheduleFileCommandHandler.cs` and `ImportExcelProgressCommandHandler.cs`
+   directly: both now wrap the parser call in a `try`/`catch` safety net (never echoing the
+   exception message), and the five specific triggers (`DateTime.FromOADate` range, `(decimal)`
+   NaN/Infinity/overflow, two XER `(int)` cast sites) are now bounds-checked before the unsafe
+   cast is ever attempted, confirmed in `ExcelProgressImporter.cs` and `XerScheduleParser.cs`
+   (the shared `TryConvertHoursToWholeDays` helper).
+3. **DoD item 2 (magic-byte check) closed.** Confirmed `FileSignatureValidator.IsXer`/`IsMspdi`/`IsXlsx`
+   are called in both command handlers before any parser runs, each producing a `FormatMismatch`
+   failed job rather than a parser-level exception.
+4. **M-02, M-03, M-04 resolved:**
+   - M-02: `ImportController.cs` now checks `file.Length` against `MaxFileSizeBytes` before
+     `CopyToAsync`, confirmed in the controller source.
+   - M-03: `System.Security.Cryptography.Xml` (found separately, same class of issue) and
+     `Microsoft.OpenApi` are both directly pinned to patched versions — confirmed via
+     `dotnet list package --vulnerable --include-transitive`: **zero vulnerable packages across
+     all 8 projects** in the solution.
+   - M-04: `ImportController.cs` now enforces `ScheduleImportRoles`
+     (PM/Planning/Admin) and `ProgressImportRoles` (PM/Planning/Site/QS/Admin) — an interim policy,
+     explicitly pending formal po-analyst/domain-expert review, not final product policy.
+5. **Full re-run, real numbers:** `dotnet build backend/CMPlus.sln` — 0 errors, 0 warnings.
+   `dotnet test` — **260/260 passing** at the time these fixes landed (94 Domain + 29 Application
+   → grew further in Sprint 4). `dotnet list package --vulnerable --include-transitive` — zero
+   findings, all 8 projects. Secret scan (gitleaks) — clean.
+
+Findings marked "verified by execution" in the original review above were reproduced in
+throwaway probe projects under the session scratchpad referencing the real
+`CMPlus.Infrastructure` assembly and EPPlus 8.5.4 — that methodology is unchanged; this
+addendum re-verifies the *fixes* the same way the original review verified the *findings*.

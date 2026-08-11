@@ -22,6 +22,15 @@ public interface IProjectRepository
     /// <c>AuditSaveChangesInterceptor</c> behaviour is exactly right here (not the S3-BE-04 bulk
     /// escape hatch), producing one <c>AuditLog</c> row with the old/new scalar values (S4-BE-02
     /// DoD).
+    ///
+    /// <para>Returns <c>false</c> on a concurrency conflict rather than throwing, matching
+    /// <c>IVariationOrderRepository</c>/<c>IPaymentCertificateRepository</c>'s existing
+    /// <c>TrySaveChangesAsync</c> shape. This became load-bearing when
+    /// <see cref="Project.RowVersion"/> was added to close S10-SEC-01 finding H-03: before the
+    /// token existed a concurrent edit silently lost one write, and afterwards an uncaught
+    /// <c>DbUpdateConcurrencyException</c> would have surfaced as a 500. Neither is acceptable for
+    /// an ordinary <c>PUT /api/v1/projects/{id}</c>, so the conflict is translated to a 409 and the
+    /// caller retries against fresh state.</para>
     /// </summary>
-    Task SaveChangesAsync(CancellationToken cancellationToken = default);
+    Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default);
 }

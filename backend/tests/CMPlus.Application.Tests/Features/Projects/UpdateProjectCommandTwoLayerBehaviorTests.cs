@@ -1,4 +1,4 @@
-using CMPlus.Application.Abstractions;
+﻿using CMPlus.Application.Abstractions;
 using CMPlus.Application.Common;
 using CMPlus.Application.Features.Projects.Commands.UpdateProject;
 using CMPlus.Domain.Common;
@@ -37,10 +37,12 @@ public class UpdateProjectCommandTwoLayerBehaviorTests
             return Task.FromResult(ProjectToReturn);
         }
 
-        public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+        public bool NextSaveHitsConcurrencyConflict { get; set; }
+
+        public Task<bool> TrySaveChangesAsync(CancellationToken cancellationToken = default)
         {
             SaveChangesCallCount++;
-            return Task.CompletedTask;
+            return Task.FromResult(!NextSaveHitsConcurrencyConflict);
         }
     }
 

@@ -7,6 +7,13 @@ names carried through unchanged — see `docs/10.` §3 for the landing migration
 money math only; approval routing and state machines for Payment Certificates live in
 [approval-workflow.md](approval-workflow.md).
 
+⚠️ **Everything in this file is money *in*** — certified/received, at contract price, including the
+contractor's margin. It is **never** Actual Cost: `PaymentCertificate` and `ProjectFinanceLedger`
+must never feed $AC$/ACWP. Money *out* is a separate ledger, ruled on in
+[actual-cost.md](actual-cost.md) §5, which quantifies the damage of conflating them (the same
+project reads $CPI = 1.0504$ on cash received versus $0.7716$ on real cost — the substitution flips
+the sign of $CV$).
+
 Precision: money `decimal(18,2)`, percent `decimal(5,2)`. Round **each line separately**,
 **half-away-from-zero**, then subtract — never compute $N_k$ at full precision and round once.
 ⚠️ **.NET trap:** `Math.Round(x, 2)` defaults to banker's rounding; pass

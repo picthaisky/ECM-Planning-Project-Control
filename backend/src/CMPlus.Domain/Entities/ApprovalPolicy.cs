@@ -80,6 +80,17 @@ public sealed class ApprovalPolicy : Entity, ITenantOwned
             throw new DomainException("ApprovalPolicy.CumulativeVoEscalationPct must be between 0 and 100 when supplied.");
         }
 
+        // domain-rules.md §4.6: "r = NULL while theta != NULL -> Policy configuration error - reject
+        // at policy save ... Do not silently disable the escalation at runtime." Checked here (not
+        // only in UpdateApprovalPolicyCommandValidator) so no future caller of CreateInitialVersion/
+        // CreateNextVersion - including ApprovalPolicySeeder - can construct this contradiction either.
+        if (cumulativeVoEscalationPct is not null && cumulativeVoEscalationRole is null)
+        {
+            throw new DomainException(
+                "ApprovalPolicy.CumulativeVoEscalationRole is required whenever CumulativeVoEscalationPct is configured " +
+                "- an escalation threshold with no role to escalate to would silently disable the control at runtime.");
+        }
+
         ValidateBands(rules);
 
         TenantId = tenantId;
@@ -172,23 +183,55 @@ public sealed class ApprovalPolicy : Entity, ITenantOwned
         AssertContiguousStepsAt(rules, points[^1], upper: null);
     }
 
+    /// <summary>
+    /// security review sprint-09.md M-03: two DIFFERENT rules that both genuinely claim the SAME
+    /// <c>StepNo</c> over an overlapping amount range must be rejected here, at the aggregate's own
+    /// construction boundary - not only by <c>UpdateApprovalPolicyCommandHandler.FindOverlappingStepNo</c>'s
+    /// additive Application-layer pre-check, which <c>ApprovalPolicySeeder</c> (and any other future
+    /// caller of <see cref="CreateInitialVersion"/>/<see cref="CreateNextVersion"/> directly) bypasses
+    /// entirely. Grouping covering rules by <c>StepNo</c> - rather than collapsing them with
+    /// <c>Distinct()</c> as this method used to - is what makes that ambiguity visible: a genuine
+    /// overlap always means more than one rule claims the identical StepNo for the identical amount,
+    /// which the Application-layer routing engine's amount-band <c>Where</c> filter would otherwise
+    /// select as two entries with the same <c>StepNo</c> in a single resolved chain
+    /// (execution-verified in the review, probe 8: "resolved steps: [1,1]") - a <c>PaymentCertificate</c>
+    /// then has no way to resolve step 2 once it advances past this ambiguous step, throwing (or,
+    /// pre-H-01-fix, silently picking whichever rule happened to be first) instead of behaving
+    /// predictably. An amount interval nobody covers at all is still permitted (see this type's own
+    /// remarks) - only a StepNo two-or-more rules simultaneously claim for the same interval is an
+    /// error.
+    /// </summary>
     private static void AssertContiguousStepsAt(IReadOnlyList<ApprovalPolicyRuleInput> rules, decimal lower, decimal? upper)
     {
         var covering = rules
             .Where(r => r.MinAmount <= lower && (upper is null ? r.MaxAmount is null : (r.MaxAmount is null || r.MaxAmount >= upper.Value)))
-            .Select(r => r.StepNo)
-            .Distinct()
-            .OrderBy(s => s)
             .ToList();
 
-        for (var expected = 1; expected <= covering.Count; expected++)
+        var rangeDescription = upper is null ? $"{lower:0.00} and above" : $"[{lower:0.00}, {upper.Value:0.00})";
+
+        var groupedByStepNo = covering.GroupBy(r => r.StepNo).OrderBy(g => g.Key).ToList();
+
+        foreach (var group in groupedByStepNo)
         {
-            if (covering[expected - 1] != expected)
+            if (group.Count() > 1)
             {
-                var rangeDescription = upper is null ? $"{lower:0.00} and above" : $"[{lower:0.00}, {upper.Value:0.00})";
+                throw new DomainException(
+                    $"ApprovalPolicyRule bands overlap: {group.Count()} rules all claim StepNo {group.Key} for " +
+                    $"the amount range {rangeDescription}. Two rules may never both apply to the same StepNo " +
+                    "for the same amount - narrow the amount bands so exactly one rule covers any given StepNo " +
+                    "at any given amount.");
+            }
+        }
+
+        var stepNumbers = groupedByStepNo.Select(g => g.Key).ToList();
+
+        for (var expected = 1; expected <= stepNumbers.Count; expected++)
+        {
+            if (stepNumbers[expected - 1] != expected)
+            {
                 throw new DomainException(
                     $"ApprovalPolicyRule bands are not a contiguous StepNo sequence for the amount range " +
-                    $"{rangeDescription}: resolved steps are [{string.Join(",", covering)}], missing StepNo {expected}.");
+                    $"{rangeDescription}: resolved steps are [{string.Join(",", stepNumbers)}], missing StepNo {expected}.");
             }
         }
     }

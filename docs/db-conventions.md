@@ -190,6 +190,10 @@ after `ActivityProgressLog` already has hundreds of thousands of rows.
 | `ApprovalAction` | `(TenantId, DocumentType, DocumentId, RevisionNo, StepNo)` | approval history lookups |
 | `ProjectFinanceLedger` | `(TenantId, ProjectId, Category)` | `SUM()` of retention/advance must seek |
 | `VariationOrder` | `(TenantId, ProjectId, Status)` | cumulative approved-VO sum runs on every VO submit |
+| `CpmRun` | `(TenantId, ProjectId, CalculatedAt DESC)` | ADR-0019 governing-run lookup, $r(d)=\arg\max\{CalculatedAt \le d\}$ — one bidirectional index serves both `GetGoverningRunAsync` (seek + `TOP(1)` scanning backward from a date cutoff) and `GetEarliestRunAsync` (same index, scanned forward) |
+| `CpmRunActivity`, `CpmRunRelation` | `(TenantId, CpmRunId)` | backs `CpmRun.Activities`/`.Relations` loading — **must** be paired with `.AsSplitQuery()` at the call site (S11-DB-01 finding: two sibling collection `Include()`s in single-query mode produce a cartesian join between them — confirmed via `ToQueryString()`, up to activities × relations rows for one run at reference scale) |
+| `DailyWeatherLog` | `(TenantId, ProjectId, LogDate DESC, RecordedAt DESC)` | S11-DB-01: date-range list queries seek on the first 3 columns; `RecordedAt` added so the handler's `OrderByDescending(LogDate).ThenByDescending(RecordedAt)` needs no separate `Sort` when a project logs same-day corrections (routine under domain-rules.md §8.2 rule 6) |
+| `IssueLog` | `(TenantId, ProjectId, CreatedAt)`, `(TenantId, ProjectId, Status)` | S11-DB-01: today's `ListIssuesQueryHandler` only needs the `(TenantId, ProjectId)` prefix (loads the whole project list, sorts/counts in memory); `Status` composite is deliberate defense-in-depth for the still-unbuilt paginated/filtered list domain-rules.md §9.3 anticipates |
 
 Additional rules:
 - **Never `SELECT *`** — every query projects only the columns it needs, especially on
@@ -201,19 +205,67 @@ Additional rules:
   `sys.dm_exec_query_stats`) showing **Seek**, not **Scan**, at representative volume (10,000+
   activities, 350,000+ progress-log rows per project) before merge — this is the concrete meaning
   behind the repeated "index seek" Definition of Done language throughout `docs/10.` §6+.
+- **Multi-collection `Include()` needs `.AsSplitQuery()`.** Loading two sibling collection
+  navigations off the same root in one query (e.g. `CpmRun.Activities` + `.Relations`) defaults to
+  EF Core's single-query mode, which joins the two collections together — a cartesian product
+  between them, not two independent result sets (EF logs `MultipleCollectionIncludeWarning` for
+  exactly this; confirmed via `ToQueryString()`, S11-DB-01). No index design fixes this — only
+  `.AsSplitQuery()` does. Its usual consistency caveat (separate round trips can observe an
+  interleaved concurrent write) does not apply to any append-only (§7) parent+children read, since
+  those are written once, atomically, and never modified again.
+
+**Known, accepted, systemic limitation — a redundant single-column FK index on (almost) every
+tenant-owned child table, present since Sprint 1's `InitialCreate` (do not re-litigate per
+feature).** EF's `ForeignKeyIndexConvention` adds a bare index on a dependent's FK property
+whenever no *other* index has that property as its **leading** column. Rule 2 above (`TenantId`
+always leads) means a table's own explicit `(TenantId, <FK>)` index can never satisfy that check,
+so EF adds a bare `(<FK>)` alongside it anyway — e.g. `IX_CpmRunActivities_CpmRunId` next to
+`IX_CpmRunActivities_TenantId_CpmRunId`, `IX_WBSNodes_ParentWbsNodeId` next to
+`IX_WBSNodes_TenantId_ProjectId_ParentWbsNodeId`, and the same pair on `CalendarException`,
+`ActivityProgressLog`, `VariationOrderScopeItem`, `EotEvaluationDriver`, and others. **Confirmed
+genuinely redundant** for every real query this codebase issues (every tenant-owned entity gets
+its own independent global filter — `ToQueryString()` shows the child table's `WHERE TenantId=@t`
+predicate even when it is only ever reached through a parent `Include()` — so the composite index's
+leading two columns always dominate the bare one). **Attempted to remove it (S11-DB-01) and
+confirmed it is not cheaply fixable:** `IMutableEntityType.RemoveIndex(...)` in `OnModelCreating`
+is undone within the same model-build pass — `ForeignKeyIndexConvention` reactively re-adds a
+covering index the moment the auto one is removed (verified by instrumenting the removal and
+inspecting `GetIndexes()` immediately after). A real fix needs a custom convention
+replacing/wrapping the built-in one, which has a **global** blast radius (every FK'd table in the
+schema, not just the one under active work) and needs a full audit before anyone ships it — a
+`system-architect`/ADR-level decision, not a per-feature patch. **Recommendation: accept it.** The
+cost is write-side only (one extra nonclustered index entry maintained per `INSERT`; these tables
+are never `UPDATE`d) and bounded; it does not affect any read plan (the optimizer never chooses a
+dominated index). Revisit only if a future write-heavy table's measured insert cost actually shows
+this mattering — not blind, and not table-by-table.
 
 ---
 
 ## 7. Append-only tables — no update/delete path
 
 `ActivityProgressLog`, `ApprovalAction`, `ProjectFinanceLedger`, `DailyWeatherLog`,
-`EvmPeriodSnapshot`, `AuditLog` are insert-only for the life of the system. Corrections are always
-compensating rows (new `INSERT`), never `UPDATE`/`DELETE` — including by a human/DBA out-of-band;
-if that ever happens it is an incident, not routine maintenance.
+`EvmPeriodSnapshot`, `AuditLog`, and (Sprint 11) `CpmRun`/`CpmRunActivity`/`CpmRunRelation`,
+`EotEvaluation`/`EotEvaluationRun`/`EotEvaluationSource`/`EotEvaluationDriver` are insert-only for
+the life of the system. Corrections are always compensating rows (new `INSERT`), never
+`UPDATE`/`DELETE` — including by a human/DBA out-of-band; if that ever happens it is an incident,
+not routine maintenance.
 
 **Application-layer enforcement** (no update/delete method exposed on the entity, no
 API surface for it) is the primary control and is `backend-developer`'s responsibility per
-`docs/10.` (e.g. S1-BE-02 for `ActivityProgressLog`).
+`docs/10.` (e.g. S1-BE-02 for `ActivityProgressLog`). Since Sprint 9 this is additionally
+structural, not just discipline: `AppendOnlyGuardInterceptor` (`IAppendOnly` marker) throws at
+`SavingChanges` for any tracked entity in `Modified`/`Deleted` state.
+
+**Gap in that guard, found during S11-DB-01 while designing `CpmRun` retention (§7.1) — record
+this so nobody rediscovers it under production pressure:** `AppendOnlyGuardInterceptor` only fires
+for `DbContext.SaveChanges(Async)` — i.e. change-tracked `Remove()`/`Update()`. EF Core 7+'s
+`ExecuteDeleteAsync`/`ExecuteUpdateAsync` (bulk operations) and any raw SQL
+(`Database.ExecuteSqlInterpolatedAsync`, exactly the technique `CpmScheduleRepository`'s Activity
+write-back already uses) **bypass `SavingChanges` entirely and are not caught by this guard.** The
+guard is a real, valuable structural control against the ordinary mistake (Sprint 9's own M-01
+finding), but it is not a complete safety net against a deliberately-written bulk/raw-SQL path —
+exactly the shape any future retention/pruning job would naturally reach for. Such a job must
+enforce citation-safety (§7.1) in its own query, never lean on this interceptor to catch a mistake.
 
 **Convention decision — DB-layer defense in depth (recommended, not yet wired up):** once these
 tables exist (Sprint 1+), grant `DENY UPDATE, DELETE ON <table> TO cmplus_app` (or an equivalent
@@ -221,7 +273,60 @@ role-based grant) for the application's runtime SQL login — the same `cmplus_a
 by `infra/docker/mssql/init/02-create-app-login.sql`, which currently has blanket `db_owner` for
 Phase 0 simplicity (no schema exists yet to scope a narrower grant to). This is flagged as a
 Sprint 1/2 `database-engineer` follow-up alongside the migration that creates each table, not
-implemented now because there is nothing to grant against yet.
+implemented now because there is nothing to grant against yet. §7.1 below depends on this
+eventually being scoped as a **role-based** grant (deny the ordinary app login, allow a separate,
+narrowly-scoped retention-job login) rather than a blanket deny — a blanket deny would make
+legitimate retention impossible too, not just accidental deletes.
+
+### 7.1 `CpmRun` retention — a sketch, not a decision (ADR-0019 open item)
+
+ADR-0019: storage grows ~875k rows/project over a project's life at the domain-rules.md §4.3
+weekly-run estimate, and "pruning a run that an `EotEvaluation` cites would silently invalidate
+that evaluation" — so retention must be defined against **citation**, never age alone. Nobody has
+built this; the following is what a future `database-engineer`/`backend-developer` pairing needs
+to turn it into an actual design doc and, given it changes what a past EOT evaluation can report,
+almost certainly its own ADR (this is a methodology choice of the same shape as ADR-0019/ADR-0020,
+not a routine housekeeping script).
+
+1. **The citation check already has its index.** `EotEvaluationRun(TenantId, CpmRunId)` (added
+   this sprint) answers "is this run cited" as a seek:
+   `NOT EXISTS (SELECT 1 FROM EotEvaluationRuns WHERE TenantId=@t AND CpmRunId=@candidate)`.
+   `EotEvaluationDriver` also carries a `CpmRunId` column but needs no separate check/index — by
+   construction in `EotEvaluator.cs` (`runsUsed`/`runOutcomes`/`driverOutcomes` are all built from
+   the same loop over the same run set), every `CpmRunId` a `Driver` row cites also appears in an
+   `EotEvaluationRun` row from the same evaluation. This is an invariant the retention job's
+   correctness leans on, not enforced by any constraint — worth a regression test the day this is
+   actually built (`EotEvaluationDriver.CpmRunId ⊆ EotEvaluationRun.CpmRunId` per evaluation).
+2. **Citation is necessary but not sufficient — two more conditions.** (a) Never the project's
+   *latest* run (it is always the live governing run for "now" and for any future date until a
+   newer run supersedes it — exclude by construction, don't rely on it happening to be "recent"
+   under whatever cutoff is chosen). (b) **Thinning changes answers, it is not a free compaction.**
+   domain-rules.md §4.3's own suggestion — "keep every run for 24 months, then keep one run per
+   month" — silently changes $r(d)=\arg\max\{CalculatedAt \le d\}$ for any *not-yet-evaluated* date
+   in a thinned month, because the run that truly governed that date may be the one thinning
+   removed. This is not automatically wrong (the survivor is still a genuinely contemporaneous run,
+   just coarser-grained for old dates), but it is a real, substantive precision trade a human should
+   confirm, not an implementation detail a pruning job decides by default. If accepted, the thinning
+   rule must keep the run with the **maximum `CalculatedAt` within the kept month** (never the
+   first) — that is the one specific survivor for which $\arg\max\{CalculatedAt \le d\}$ stays
+   correct for every date from its own `CalculatedAt` through the end of that month.
+3. **Hard delete, not soft delete — and not through `CmPlusDbContext`'s ordinary pipeline.** A
+   boolean `IsDeleted` flag would be an `UPDATE` on an `IAppendOnly` row — the same thing this
+   marker exists to forbid everywhere else in the schema; there is no soft-delete precedent
+   anywhere in this codebase and introducing one here would be a new, inconsistent pattern for one
+   table. Hard `DELETE` is consistent with treating pruning as a deliberate, out-of-band
+   maintenance action (`CpmRun`'s own doc remarks already anticipate this), the same posture as §7's
+   `DENY UPDATE, DELETE ON ... TO cmplus_app` recommendation — once that grant lands scoped as a
+   role (not a blanket deny), the retention job runs under its own separate, narrowly-granted login,
+   so the ordinary application identity remains structurally incapable of deleting this data at all
+   (closing the §7 `ExecuteDeleteAsync`/raw-SQL gap for this specific case, deliberately, rather than
+   leaving it as an open bypass). Children delete before parent in one transaction (`CpmRunRelation`,
+   `CpmRunActivity`, then `CpmRun` — the existing `OnDelete(DeleteBehavior.Restrict)` FKs reject the
+   parent-first order), using the same `(TenantId, CpmRunId)` index the write path already needs.
+4. **Audit.** One summarizing `AuditLog` row per pruning run (counts deleted, cutoff/policy version
+   used) — the established `SuppressPerEntityAudit` + single-row pattern `CpmScheduleRepository`/
+   `EotEvaluationRepository` already use for their own bulk writes, so a later "why is this old
+   evaluation's basis coarser than expected" question stays answerable.
 
 ---
 

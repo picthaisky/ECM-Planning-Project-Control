@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatMoney, formatPercent, roundHalfAwayFromZero } from './format'
+import { formatMoney, formatMoneyMillions, formatPercent, formatRatio, roundHalfAwayFromZero } from './format'
 
 describe('roundHalfAwayFromZero', () => {
   it('rounds the classic banker-rounding trap fixture (payment-retention.md P7) up, not down', () => {
@@ -39,5 +39,48 @@ describe('formatPercent', () => {
 
   it('supports a custom decimal count (e.g. the dashboard 1-decimal cadence)', () => {
     expect(formatPercent(54.2, 1)).toBe('54.2%')
+  })
+})
+
+describe('formatRatio', () => {
+  it('formats with exactly 2 decimals by default and no thousand separator/unit', () => {
+    expect(formatRatio(0.92)).toBe('0.92')
+    expect(formatRatio(1.04)).toBe('1.04')
+  })
+
+  it('accepts a decimal-safe string (the API wire shape — RoundingRules.RatioDecimals = 6dp)', () => {
+    expect(formatRatio('0.857143')).toBe('0.86')
+    expect(formatRatio('1.166667')).toBe('1.17')
+  })
+
+  it('falls back to an em dash for a non-numeric input rather than throwing or showing NaN', () => {
+    expect(formatRatio('not-a-number')).toBe('—')
+  })
+
+  it('supports a custom decimal count', () => {
+    expect(formatRatio('1.166667', 4)).toBe('1.1667')
+  })
+})
+
+describe('formatMoneyMillions', () => {
+  it('scales baht to million-baht with exactly 2 decimals and the "MB" suffix (prototype convention)', () => {
+    expect(formatMoneyMillions(466_000_000)).toBe('466.00 MB')
+    expect(formatMoneyMillions(238_400_000)).toBe('238.40 MB')
+  })
+
+  it('accepts a decimal-safe string (the API wire shape)', () => {
+    expect(formatMoneyMillions('253100000.00')).toBe('253.10 MB')
+  })
+
+  it('keeps the sign for a negative funding position (Net Cash Position)', () => {
+    expect(formatMoneyMillions(-14_700_000)).toBe('-14.70 MB')
+  })
+
+  it('rounds to 2dp (not truncated) — half-away-from-zero midpoint behavior itself is covered by roundHalfAwayFromZero above', () => {
+    expect(formatMoneyMillions(1_236_000)).toBe('1.24 MB') // 1.236 MB -> 1.24, proves rounding not truncation
+  })
+
+  it('falls back to an em dash for a non-numeric input rather than throwing or showing NaN', () => {
+    expect(formatMoneyMillions('not-a-number')).toBe('—')
   })
 })

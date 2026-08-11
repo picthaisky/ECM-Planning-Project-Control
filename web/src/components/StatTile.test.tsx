@@ -15,6 +15,11 @@ describe('StatTile', () => {
     expect(screen.getByText('0.92').className).toMatch(/text-danger/)
   })
 
+  it('applies the gold tone class for the EVM EV tile (matches the prototype exactly)', () => {
+    render(<StatTile label="EV (BCWP)" value="262.90" tone="gold" />)
+    expect(screen.getByText('262.90').className).toMatch(/text-gold/)
+  })
+
   it('loading state: shows a skeleton and not the value', () => {
     render(<StatTile label="EAC" state="loading" />)
     expect(screen.getByRole('status')).toBeInTheDocument()

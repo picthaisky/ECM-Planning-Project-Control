@@ -12,6 +12,12 @@ const STATUS_TONE_MAP: Record<string, StatusPillTone> = {
   // File import jobs (S3-FE-01, FileImportJob.Status)
   succeeded: 'success',
   failed: 'danger',
+  // S9-FE-01/02: `PaymentCertificateStatus` (approval-workflow.md §3). `notdue`/`draft`/`cancelled`
+  // are deliberately left out of this table — they already resolve to the intended `neutral` via
+  // the fallback below, so an explicit entry would be redundant, not a stronger guarantee.
+  pendingapproval: 'warning',
+  certified: 'success',
+  paid: 'success',
 }
 
 /** Map a raw status keyword (case-insensitive) to a design-token tone — never pick an ad hoc color per status. */
