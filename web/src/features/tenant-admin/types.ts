@@ -56,3 +56,74 @@ export interface UpdateApprovalPolicyPayload {
   cumulativeVoEscalationRole: UserRole | null
   rules: ApprovalPolicyRule[]
 }
+
+/**
+ * S15-BE-01 wire shapes, transcribed from the real source: `backend/src/CMPlus.Application/
+ * Features/Approval/Queries/{GetApprovalPolicyVersionHistory/ApprovalPolicyVersionHistoryEntryDto,
+ * SimulateRouting/ApprovalRoutingSimulationDto}.cs`,
+ * `backend/src/CMPlus.WebApi/Controllers/Approval/{TenantApprovalPoliciesController,
+ * SimulateApprovalRoutingRequest}.cs`.
+ */
+
+/** One row of the tenant-wide policy's version timeline (`GET .../{documentType}/history`) —
+ * assembled server-side from `ApprovalPolicy` (every version, never deleted) + `AuditLog`
+ * (who/when) — no new storage. `createdByUserId`/`createdAt`/`lastModifiedByUserId`/
+ * `lastModifiedAt` are `null` when the version was created by a path that bypasses
+ * `AuditSaveChangesInterceptor` (e.g. the tenant-provisioning seeder) — read as "unknown", never
+ * fabricated. */
+export interface ApprovalPolicyVersionHistoryEntry {
+  approvalPolicyId: string
+  version: number
+  isActive: boolean
+  effectiveFrom: string
+  effectiveTo: string | null
+  allowSelfApproval: boolean
+  cumulativeVoEscalationPct: string | null
+  cumulativeVoEscalationRole: UserRole | null
+  ruleCount: number
+  createdByUserId: string | null
+  createdAt: string | null
+  lastModifiedByUserId: string | null
+  lastModifiedAt: string | null
+}
+
+/** One rung of a simulated chain (`SimulatedApprovalChainStepDto`). */
+export interface SimulatedApprovalChainStep {
+  stepNo: number
+  requiredRole: UserRole
+  quorumCount: number
+}
+
+/** One of the ADR-0021 simultaneously-active policy rows detected in the simulated scope
+ * (`AmbiguousActivePolicyDto`) — present only when `multipleActivePoliciesDetected` is `true`. */
+export interface AmbiguousActivePolicy {
+  approvalPolicyId: string
+  version: number
+}
+
+/** `POST /api/v1/tenants/{tenantId}/approval-policies/{documentType}/simulate` request body
+ * (`SimulateApprovalRoutingRequest`). `projectId` is mandatory — escalation (VariationOrder only)
+ * needs a real project's baseline contract value, so "no project" is never a valid simulation. */
+export interface SimulateApprovalRoutingPayload {
+  projectId: string
+  amount: string
+}
+
+/** `POST .../{documentType}/simulate` 200 response (`ApprovalRoutingSimulationDto`) — the exact
+ * chain a real Submit would resolve right now against `approvalPolicyVersion`, without creating any
+ * document. `multipleActivePoliciesDetected`/`ambiguousActivePolicies` surface ADR-0021's known
+ * corruption (two simultaneously-active tenant-wide policies) rather than hiding it. */
+export interface ApprovalRoutingSimulation {
+  documentType: ApprovalDocumentType
+  projectId: string
+  inputAmount: string
+  routingAmount: string
+  approvalPolicyId: string
+  approvalPolicyVersion: number
+  usedFallbackChain: boolean
+  steps: SimulatedApprovalChainStep[]
+  escalationApplied: boolean
+  allowSelfApproval: boolean
+  multipleActivePoliciesDetected: boolean
+  ambiguousActivePolicies: AmbiguousActivePolicy[]
+}

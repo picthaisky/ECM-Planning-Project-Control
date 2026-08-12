@@ -15,6 +15,15 @@ export interface OutboxStorageAdapter {
    * UI list" — callers that need a specific order (e.g. oldest-first) sort client-side. */
   list(kind?: string): Promise<OutboxItem[]>
   delete(id: string): Promise<void>
+  /**
+   * Atomic read-modify-write of a single record (Sprint 12 security review N-02). Reads the *current*
+   * record for `id` and, if it exists, writes back whatever `apply` returns — both inside one
+   * `readwrite` transaction, so a concurrent write cannot land in a read-then-write window and be
+   * reverted (the exact lost-update `quarantineOwnerBlobs` hit with its list-snapshot-then-put shape).
+   * `apply` returning `undefined` means "leave it as-is" (no write). Missing id is a no-op. Returns
+   * whether a write happened.
+   */
+  mutate(id: string, apply: (current: OutboxItem) => OutboxItem | undefined): Promise<boolean>
 }
 
 const DB_NAME = 'cmplus-outbox'
@@ -87,6 +96,38 @@ export function createIndexedDbOutboxStorage(dbName: string = DB_NAME): OutboxSt
     },
     delete: async (id) => {
       await withStore<undefined>('readwrite', (store) => store.delete(id))
+    },
+    // The get and the put must be issued into the SAME active readwrite transaction with no `await`
+    // between them: awaiting a resolved microtask can let IndexedDB auto-commit the transaction,
+    // yielding a TransactionInactiveError on the subsequent put. So the put is issued synchronously
+    // inside the get's onsuccess, and only the whole-transaction completion is awaited.
+    mutate: async (id, apply) => {
+      const db = await openDatabase(dbName)
+      try {
+        const tx = db.transaction(STORE_NAME, 'readwrite')
+        const store = tx.objectStore(STORE_NAME)
+        let wrote = false
+        await new Promise<void>((resolve, reject) => {
+          const getRequest = store.get(id)
+          getRequest.onsuccess = () => {
+            const current = getRequest.result as OutboxItem | undefined
+            if (current !== undefined) {
+              const next = apply(current)
+              if (next !== undefined) {
+                store.put(next)
+                wrote = true
+              }
+            }
+          }
+          getRequest.onerror = () => reject(getRequest.error ?? new Error('ธุรกรรม IndexedDB ล้มเหลว'))
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(tx.error ?? new Error('ธุรกรรม IndexedDB ล้มเหลว'))
+          tx.onabort = () => reject(tx.error ?? new Error('ธุรกรรม IndexedDB ถูกยกเลิก'))
+        })
+        return wrote
+      } finally {
+        db.close()
+      }
     },
   }
 }

@@ -48,3 +48,33 @@ tests/
   graphs/collections — fully unit-testable without a database.
 - **Performance:** WBS tree in one query (materialized path or recursive CTE per ADR), paginate
   activity lists, `AsSplitQuery` for wide includes.
+- **Append-only enforcement:** a doc comment claiming "append-only" is not enforcement — an ordinary
+  `DbContext` can still track the entity as `Modified`/`Deleted`. Implement `IAppendOnly` (rejects
+  `Modified`/`Deleted`) or the narrower `INeverModified` (blocks only `Modified`, for
+  clear-and-rebuild snapshot children) and let the registered `AppendOnlyGuardInterceptor` enforce it
+  at `SavingChanges`. Reuse these two markers for any new legal-evidence or snapshot entity rather
+  than re-deriving the pattern — see `.claude/knowledge/patterns/conventions.md`.
+- **Authority resolution:** compute "who may act on this document" once, at submission, and persist
+  the resolved chain/policy version on the document. Never re-derive authority from the *current*
+  policy at approve/reject time — that re-derivation is this codebase's recurring
+  privilege-escalation bug class (ADR-0008; sprint-09.md H-01).
+
+## Testing patterns
+
+- **EF Core InMemory does not prove a storage-engine guarantee.** It ignores unique indexes
+  entirely and has no transaction support, so it cannot validate rollback-on-failure, unique-index
+  enforcement (including the NULL-discriminator gap — ADR-0021), or SQL Server statement-ordering
+  behaviour. Verify those specifically on SQLite (or a real SQL Server run) and label
+  InMemory-only results as "logic verified, storage guarantee not verified."
+- **Guard transactional/ordering-sensitive repository code on `Database.IsRelational()`** so
+  InMemory skips logic it cannot support (`BaselineRepository.TryActivateAsync`), rather than
+  opening a transaction/suppressing a warning just to keep InMemory quiet.
+- **Never edit the shared `CustomWebApplicationFactory`/`CmPlusDbContext` registration for one
+  test's needs** — it is reused by the whole Integration suite and a "small" change to it can break
+  unrelated test classes non-deterministically. Use `WithWebHostBuilder(...)` inside the specific
+  test class to layer config onto a cloned factory instead (`LoginRateLimiterTests`,
+  `FallbackPolicyTests`).
+- **Never trust a passing suite as proof a guard works.** Mutate the implementation (delete/invert
+  the guarded branch) and confirm a test fails; assert on the durable artifact (stored bytes, row
+  counts) rather than an in-memory return value; include at least one fixture where the "obvious"
+  shortcut (same role, same tenant, same tier) does not hold.

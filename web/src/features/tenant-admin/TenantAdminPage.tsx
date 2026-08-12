@@ -1,9 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
+import { useProjectStore } from '../../store/projectStore'
 import { cx } from '../../utils/cx'
 import { ApprovalPolicyEditorForm } from './components/ApprovalPolicyEditorForm'
+import { PolicyHistoryTimeline } from './components/PolicyHistoryTimeline'
+import { RoutingSimulatorPanel } from './components/RoutingSimulatorPanel'
 import { useApprovalPolicy } from './useApprovalPolicy'
+import { useApprovalPolicyHistory } from './useApprovalPolicyHistory'
+import { useRoutingSimulator } from './useRoutingSimulator'
 import { useUpdateApprovalPolicy } from './useUpdateApprovalPolicy'
 import type { ApprovalDocumentType } from './types'
 
@@ -17,30 +22,62 @@ interface DocumentTypeEditorProps {
   documentType: ApprovalDocumentType
 }
 
-/** Owns the load+save hooks for exactly one document type. Rendered with `key={documentType}` by
- * `TenantAdminPage` so switching tabs remounts it cleanly — a "saved v4" banner (or a save error)
- * from the *other* document type's policy must never bleed across the tab switch. */
+/** Owns the load+save+history+simulate hooks for exactly one document type. Rendered with
+ * `key={documentType}` by `TenantAdminPage` so switching tabs remounts it cleanly — a "saved v4"
+ * banner (or a save error, or a stale simulator result) from the *other* document type's policy
+ * must never bleed across the tab switch. */
 function DocumentTypeEditor({ tenantId, documentType }: DocumentTypeEditorProps) {
   const policyData = useApprovalPolicy(tenantId, documentType)
   const updateData = useUpdateApprovalPolicy(tenantId, documentType)
+  const historyData = useApprovalPolicyHistory(tenantId, documentType)
+  const simulatorData = useRoutingSimulator(tenantId, documentType)
+  const defaultProjectId = useProjectStore((state) => state.currentProjectId)
 
   async function handleSave(payload: Parameters<typeof updateData.save>[0]) {
     const updated = await updateData.save(payload)
-    if (updated) await policyData.reload()
+    if (updated) {
+      await policyData.reload()
+      // A save creates Version+1 (S9-BE-06) — the timeline must reflect it immediately, and any
+      // simulator result on screen was resolved against a now-superseded version, so it is cleared
+      // rather than left displayed with a stale "v{N}" label.
+      await historyData.reload()
+      simulatorData.reset()
+    }
   }
 
   return (
-    <ApprovalPolicyEditorForm
-      documentType={documentType}
-      policy={policyData.policy}
-      loadState={policyData.loadState}
-      loadError={policyData.loadError}
-      saveState={updateData.saveState}
-      saveError={updateData.saveError}
-      savedVersion={updateData.savedVersion}
-      onDismissSavedVersion={updateData.clearSavedVersion}
-      onSave={(payload) => void handleSave(payload)}
-    />
+    <div className="flex flex-col gap-4">
+      <div className="rounded-card border border-border bg-surface p-5">
+        <ApprovalPolicyEditorForm
+          documentType={documentType}
+          policy={policyData.policy}
+          loadState={policyData.loadState}
+          loadError={policyData.loadError}
+          saveState={updateData.saveState}
+          saveError={updateData.saveError}
+          savedVersion={updateData.savedVersion}
+          onDismissSavedVersion={updateData.clearSavedVersion}
+          onSave={(payload) => void handleSave(payload)}
+        />
+      </div>
+
+      <PolicyHistoryTimeline
+        documentType={documentType}
+        entries={historyData.entries}
+        loadState={historyData.loadState}
+        loadError={historyData.loadError}
+        onRetry={() => void historyData.reload()}
+      />
+
+      <RoutingSimulatorPanel
+        documentType={documentType}
+        defaultProjectId={defaultProjectId}
+        state={simulatorData.state}
+        error={simulatorData.error}
+        result={simulatorData.result}
+        onSimulate={(payload) => void simulatorData.simulate(payload)}
+      />
+    </div>
   )
 }
 
@@ -55,6 +92,13 @@ function DocumentTypeEditor({ tenantId, documentType }: DocumentTypeEditorProps)
  * the same component/state every other role gate in this app uses; the backend enforces the actual
  * boundary independently (`TenantApprovalPoliciesController`'s class-level `[Authorize(Roles =
  * "Admin")]`) regardless of this client-side guard.
+ *
+ * S15-FE-01 extends this screen (per document-type tab, via `DocumentTypeEditor`) with the version
+ * timeline (`PolicyHistoryTimeline`, `GET .../{documentType}/history`) and the routing simulator
+ * (`RoutingSimulatorPanel`, `POST .../{documentType}/simulate`) below the existing editor — both
+ * `Admin`-only, tenant-scoped `TenantApprovalPoliciesController` actions, so they inherit the exact
+ * same `RequireRole`/`[Authorize(Roles = "Admin")]` defence-in-depth this route already has; no new
+ * route or guard was needed.
  */
 export function TenantAdminPage() {
   const tenantId = useAuthStore((state) => state.claims?.tenantId ?? null)
@@ -82,7 +126,7 @@ export function TenantAdminPage() {
         </Link>
       </header>
 
-      <main className="mx-auto max-w-4xl px-6 py-6">
+      <main className="mx-auto max-w-5xl px-6 py-6">
         <div className="mb-4 flex gap-2" role="tablist" aria-label="ประเภทเอกสาร">
           {DOCUMENT_TYPE_TABS.map((tab) => (
             <button
@@ -103,9 +147,7 @@ export function TenantAdminPage() {
           ))}
         </div>
 
-        <div className="rounded-card border border-border bg-surface p-5">
-          <DocumentTypeEditor key={documentType} tenantId={tenantId} documentType={documentType} />
-        </div>
+        <DocumentTypeEditor key={documentType} tenantId={tenantId} documentType={documentType} />
       </main>
     </div>
   )

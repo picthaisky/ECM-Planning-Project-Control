@@ -1,0 +1,85 @@
+# S15-DO-01 (docs/10. Sprint 15, §9; DoD: "...dependency ถูกอัปเดตให้ทันสมัย" - dependencies kept
+# current). Complements ci.yml's vulnerability-scan gates rather than replacing them: this file
+# only opens the PRs; ci.yml's `backend`/`frontend` jobs (NuGet `list --vulnerable`, npm audit
+# shipped-surface + full-graph) still vet every one of them like any other PR before merge - a
+# Dependabot PR gets no bypass of branch protection or the human-approval rule (CLAUDE.md).
+#
+# NOTE on scope: this file governs only the routine, scheduled *version-update* PRs below. GitHub
+# Dependabot *security* updates (opened immediately on a new advisory, independent of the
+# `schedule:` cadence) are a separate repository setting - "Settings > Code security > Dependabot
+# security updates" - not expressible in this YAML file. That toggle is a human action, out of
+# this artifact's scope; recommended as a companion change alongside this file (see the task
+# report). Once enabled, an in-between-schedule High/Critical advisory (e.g. a future NuGet or
+# npm finding) opens its own PR right away rather than waiting for the weekly run below.
+#
+# Cadence: weekly (Monday). Daily would out-pace review capacity on a small team and just becomes
+# noise that gets batch-ignored (the opposite of "kept current"); monthly is too slow for a
+# security-adjacent gate whose whole point is freshness. Weekly matches this project's existing
+# review rhythm (PRs already require human approval before merge, CLAUDE.md) without being so
+# frequent that dependency PRs drown out feature PRs in the queue.
+version: 2
+updates:
+  # Backend - NuGet, matching backend/CMPlus.sln's project layout (src/ + tests/, all under
+  # backend/). Directory is the .sln's own folder, same convention ci.yml's `backend` job uses
+  # (`working-directory: backend`).
+  - package-ecosystem: "nuget"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "Asia/Bangkok" # matches perf-nightly.yml's own off-hours reasoning (deep off-hours ICT)
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "backend"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # Patch/minor bumps batched into one PR per week to keep review volume sane; a major bump
+      # (more likely to be breaking, per SemVer) always gets its own PR so it isn't hidden inside
+      # a batch and can be reviewed/tested on its own merits.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Frontend - npm, matching web/package.json's location. Dev-only bumps (the nanoid/
+  # brace-expansion pair tracked in ci.yml's frontend job, S15-SEC-02 L-08) flow through here too
+  # - Dependabot does not distinguish dependencies/devDependencies for scheduling, only the gate
+  # in ci.yml distinguishes shipped-surface vs. full-graph severity.
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "frontend"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # The workflow files themselves (actions/checkout, actions/cache, docker/login-action, etc. -
+  # every pinned `uses:` in ci.yml / perf-nightly.yml) are a dependency graph too and are
+  # otherwise invisible to both scans above (neither NuGet nor npm audit inspects them).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "03:00"
+      timezone: "Asia/Bangkok"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore(deps)"

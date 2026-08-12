@@ -204,6 +204,61 @@ public class SubmitVariationOrderCommandHandlerTests
         Assert.Empty(vo.ApprovalSteps);
     }
 
+    /// <summary>
+    /// N-06 (docs/security/reviews/sprint-10.md §10.8), at the real handler boundary. The
+    /// production <c>IApprovalPolicyReader.GetCandidatePoliciesAsync</c> (and its test double here,
+    /// <see cref="FakeApprovalPolicyReaderForPayment"/>) already filters to
+    /// <c>IsActive</c>/effective-window at the query itself, so "every version deactivated" collapses
+    /// to an EMPTY <c>CandidatePolicies</c> by the time it reaches <c>Resolve</c> - the genuine,
+    /// unchanged step-6 case, proven directly against <c>ApprovalRoutingService</c> in
+    /// <c>RoutingFixtureTests.N06_...</c>. The shape of N-06 that DOES reach this handler with a
+    /// NON-EMPTY candidate set is a policy that exists and is active/effective for the tenant, but
+    /// scoped to a DIFFERENT project via <c>ApprovalPolicy.ProjectId</c> (schema-present per ADR-0008,
+    /// just not yet reachable through any write endpoint) - with no tenant-wide default configured at
+    /// all. <c>SelectPolicy</c> then finds a candidate for neither this project nor the tenant default
+    /// and returns null: before the fix this silently substituted the permissive Guid.Empty fallback
+    /// chain; after the fix, submission fails closed with 422 PolicyGap and the VO never leaves Draft.
+    /// </summary>
+    [Fact]
+    public async Task N06_Policies_Exist_For_The_Tenant_But_None_Apply_To_This_Project_Fails_Closed_And_Leaves_The_Vo_In_Draft()
+    {
+        var tenantId = Guid.NewGuid();
+        var projectRepository = new FakeProjectRepository();
+        var seededProject = Project.Create(
+            tenantId, "Project", "P-1", "Owner", Now.AddYears(-1), Now.AddYears(1),
+            bac: 485_000_000.00m, dataDate: Now, contractValue: 485_000_000.00m);
+        projectRepository.Seed(seededProject);
+        var projectId = seededProject.Id;
+
+        var otherProjectId = Guid.NewGuid();
+        var policyReader = new FakeApprovalPolicyReaderForPayment();
+        // Active, in-window - but a project-scoped override for a DIFFERENT project. No
+        // tenant-wide default (ProjectId == null) exists anywhere for this tenant/document type, so
+        // GetCandidatePoliciesAsync legitimately returns this one non-empty candidate for a Submit
+        // against `projectId`, and SelectPolicy still cannot resolve one that applies here.
+        policyReader.Policies.Add(ApprovalPolicy.CreateInitialVersion(
+            tenantId, otherProjectId, ApprovalDocumentType.VariationOrder, Now.AddYears(-1), ThDefaultVoRules));
+
+        var repository = new FakeVariationOrderRepository();
+        var vo = new Domain.Entities.VariationOrder(
+            tenantId, projectId, "VO-1", Guid.NewGuid(), 250_000.00m, null, null, 0,
+            [new VariationOrderScopeItemInput(Guid.NewGuid(), 250_000.00m)]);
+        repository.Seed(vo);
+
+        var handler = new SubmitVariationOrderCommandHandler(
+            repository, projectRepository, policyReader, new ApprovalRoutingService(), new FakeApprovalActionRepository(),
+            new FakeTenantProviderForPayment(tenantId), new FakeCurrentUserContextForPayment(Guid.NewGuid(), UserRole.QS),
+            new FakeClockForPayment(Now));
+
+        var result = await handler.Handle(new SubmitVariationOrderCommand(vo.Id), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ApprovalErrorCodes.PolicyGap, result.Error);
+        Assert.Equal(Domain.Enums.VariationOrderStatus.Draft, vo.Status); // never the Guid.Empty-pinned fallback
+        Assert.Empty(vo.ApprovalSteps);
+        Assert.Null(vo.ApprovalPolicyId); // unset - Submit() was never called, no Guid.Empty pin either
+    }
+
     [Fact]
     public async Task A_Threshold_Configured_Policy_With_No_Usable_Baseline_Fails_Closed_With_ContractValueNotConfigured()
     {

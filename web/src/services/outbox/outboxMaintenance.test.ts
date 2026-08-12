@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SYNCED_RETENTION_MS, purgeExpiredSyncedItems, quarantineOwnerBlobs } from './outboxMaintenance'
 import { createInMemoryOutboxStorage } from './storage.inMemory'
+import type { OutboxStorageAdapter } from './storage'
 import type { OutboxItem } from './types'
 
 const OWNER_A = { userId: 'user-a', tenantId: 'tenant-1' }
@@ -73,6 +74,44 @@ describe('quarantineOwnerBlobs (H-02 fix bullet 2, Sprint 12 security review)', 
   it('is a safe no-op on an empty outbox', async () => {
     const storage = createInMemoryOutboxStorage()
     await expect(quarantineOwnerBlobs(storage, OWNER_A)).resolves.toBe(0)
+  })
+
+  it('does not revert a concurrent markSynced that lands between its list snapshot and its write (N-02)', async () => {
+    // Reproduces the exact lost-update window the review describes: logout quarantine runs while an
+    // in-flight upload completes. The old list-snapshot-then-put shape wrote the whole stale item
+    // back, reverting a just-synced record to status=syncing/serverId=null and telling the user to
+    // re-shoot a photo the server already held. This test forces the interleave via a storage wrapper
+    // whose list() returns the pre-sync snapshot but then immediately commits the concurrent
+    // markSynced — so it fails against the old code and passes only with the mutate()-based fix.
+    const inner = createInMemoryOutboxStorage()
+    await inner.put(makeItem({ id: 'racing', status: 'syncing' }))
+
+    let raced = false
+    const storage: OutboxStorageAdapter = {
+      ...inner,
+      list: async (kind) => {
+        const snapshot = await inner.list(kind) // stale: still shows blob present, status=syncing
+        if (!raced) {
+          raced = true
+          await inner.mutate('racing', (current) => ({
+            ...current,
+            status: 'synced',
+            serverId: 'srv-1',
+            syncedAt: '2026-07-08T10:00:00.000Z',
+            blob: null,
+          }))
+        }
+        return snapshot
+      },
+    }
+
+    const cleared = await quarantineOwnerBlobs(storage, OWNER_A)
+
+    const after = await inner.get('racing')
+    expect(after?.status).toBe('synced') // NOT reverted to 'syncing'
+    expect(after?.serverId).toBe('srv-1') // NOT reverted to null
+    expect(after?.blob).toBeNull() // still quarantined, exactly once
+    expect(cleared).toBe(0) // mutate re-read blob===null → genuine no-op, not a stale overwrite
   })
 })
 

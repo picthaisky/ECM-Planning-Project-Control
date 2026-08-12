@@ -275,6 +275,12 @@ public class ApprovalRoutingServiceTests
     [Fact]
     public void No_Policy_At_All_Falls_Back_To_A_Single_Mandatory_ProjectDirector_Step()
     {
+        // approval-workflow.md §5.3 step 6's GENUINE case: CandidatePolicies is EMPTY - this
+        // tenant has no policy configured at all for this document type. N-06
+        // (docs/security/reviews/sprint-10.md §10.8) narrowed the permissive fallback to fire
+        // ONLY here; this test pins that the genuine "no policy at all" case is unchanged by that
+        // fix - contrast with the N-06 test immediately below, where CandidatePolicies is
+        // non-empty and the outcome must now be a 422 PolicyGap, never this fallback.
         var request = new ApprovalRoutingRequest(
             DocumentType: ApprovalDocumentType.VariationOrder, ProjectId: null, Amount: 250_000m,
             SubmittedAt: SubmittedAt, CandidatePolicies: []);
@@ -284,6 +290,36 @@ public class ApprovalRoutingServiceTests
         Assert.True(result.IsSuccess);
         Assert.Equal(Guid.Empty, result.Value.ApprovalPolicyId);
         Assert.Equal([UserRole.ProjectDirector], result.Value.Steps.Select(s => s.RequiredRole).ToList());
+    }
+
+    [Fact]
+    public void N06_Policies_Exist_For_The_Tenant_But_None_Are_Currently_Active_Fails_Closed_With_PolicyGap_Not_The_Permissive_Fallback()
+    {
+        // N-06 (docs/security/reviews/sprint-10.md §10.8) - the defect this test exists to catch:
+        // before the fix, ApprovalRoutingService.Resolve's `policy is null` branch could not tell
+        // "this tenant has no policy at all" (CandidatePolicies empty, the test above) apart from
+        // "this tenant HAS a policy for this document type, but it is not currently active/
+        // effective" (CandidatePolicies non-empty, this test) - both silently produced the SAME
+        // permissive single-ProjectDirector FallbackChain (ApprovalPolicyId = Guid.Empty, no
+        // Executive rung, no escalation check). That is the same "silently permissive" defect
+        // class as H-01: a misconfigured tenant (every version deactivated with nothing currently
+        // active) must fail CLOSED with 422 PolicyGap instead of quietly routing a money-moving
+        // document through a weak 1-step chain.
+        var deactivatedPolicy = ApprovalPolicy.CreateInitialVersion(
+            Guid.NewGuid(), projectId: null, ApprovalDocumentType.VariationOrder, SubmittedAt.AddYears(-1),
+            [new ApprovalPolicyRuleInput(1, 0m, null, UserRole.ProjectDirector)]);
+        deactivatedPolicy.Deactivate(SubmittedAt); // the tenant's ONLY VO policy - now inactive
+
+        // A large amount (would have escalated under a real chain) so a silent fallback would be
+        // maximally consequential, not merely a boundary case.
+        var request = new ApprovalRoutingRequest(
+            DocumentType: ApprovalDocumentType.VariationOrder, ProjectId: null, Amount: 50_000_000m,
+            SubmittedAt: SubmittedAt, CandidatePolicies: [deactivatedPolicy]);
+
+        var result = _service.Resolve(request);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ApprovalErrorCodes.PolicyGap, result.Error);
     }
 
     [Fact]

@@ -311,15 +311,13 @@ step 3 `ProjectDirector` (10,000,000.00 → ∞).
 1. **IPC routing amount:** gross certified $G_k$ (recommended) or net payment $N_k$? Affects how
    often the Director is pulled in — at $r=5\%,a=10\%$ the net is 15% lower than the gross, so
    certificates near a threshold would route differently.
-2. **Cumulative-VO escalation threshold** (= risk R-04 in `docs/10.` §11, due before Sprint 10):
-   is 10% the right default, and does the counter reset when a formal contract amendment absorbs
-   the approved VOs? **Still open — no default is set anywhere; `CumulativeVoEscalationPct` is
-   nullable and `NULL` means "no escalation configured", never "10".** Two further sub-questions
-   were surfaced while specifying it, and both change the answer more than the threshold does:
-   what goes in the **numerator** (net signed / gross absolute / additions-only) and in the
-   **denominator** (original vs current contract value — the shipped `ApprovalRoutingService`
-   silently implements *current*, which is self-diluting). Full statement of all four, with
-   fixtures that make each choice testable: `docs/specs/variation-order/domain-rules.md` §4.
+2. **Cumulative-VO escalation threshold** — **Resolved 2026-08-10, see ADR-0015.** Default
+   **10.00%**; the counter **resets on a formal contract amendment** (re-baselines against the
+   amended value); numerator is **net signed** (additions less deductions); denominator is the
+   **baseline contract value for the current cumulative window**, not the live, self-diluting
+   `ContractValue` the code originally used (that was a bug, fixed alongside the ADR).
+   `CumulativeVoEscalationPct` stays nullable — `NULL` still means "no escalation configured", never
+   "10" — and `ApprovalPolicySeeder` seeds `NULL` deliberately. Fixtures: `domain-rules.md` §4.
 3. **Can an intermediate approver reject outright?** Recommended answer is no (return-for-revision
    only). Confirm this matches the organisation's DoA. *(Distinct from the quorum question, which
    is no longer open — see §6.2a for the ruling on whether one person may terminally reject a step

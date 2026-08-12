@@ -46,6 +46,12 @@ public sealed class CustomWebApplicationFactory : WebApplicationFactory<Program>
                 ["Jwt:Audience"] = JwtAudienceForTests,
                 ["Jwt:ExpiryMinutes"] = "60",
                 ["Storage:LocalRootPath"] = PhotoStorageRootPath,
+                // sprint-15-owasp.md M-1: the shared integration suite hits /auth/login far more than
+                // 10x/min from a single loopback IP (every class logs in during setup), so the real
+                // per-IP login limiter would start 429-ing unrelated tests. Disable it here; a
+                // dedicated test (LoginRateLimiterTests) re-enables it via its own factory config to
+                // prove the 429 path.
+                ["RateLimiting:Login:Enabled"] = "false",
             });
         });
 

@@ -73,15 +73,33 @@ public sealed class LocalDiskFileStorage : IFileStorage
     private string ResolvePath(string key)
     {
         var combined = Path.GetFullPath(Path.Combine(_rootPath, key));
-        var rootWithSeparator = _rootPath.EndsWith(Path.DirectorySeparatorChar)
-            ? _rootPath
-            : _rootPath + Path.DirectorySeparatorChar;
-
-        if (!combined.StartsWith(rootWithSeparator, StringComparison.OrdinalIgnoreCase))
+        if (!IsPathWithinRoot(combined, _rootPath, filesystemIsCaseSensitive: !OperatingSystem.IsWindows()))
         {
             throw new InvalidOperationException($"Storage key '{key}' resolves outside the configured storage root.");
         }
 
         return combined;
+    }
+
+    /// <summary>
+    /// Pure containment predicate for the traversal guard, extracted so both filesystem-case modes
+    /// are testable regardless of the host OS (sprint-12/15 review L-03). On a case-INsensitive
+    /// filesystem (Windows/NTFS), <c>.../Data</c> and <c>.../data</c> are the same directory, so
+    /// <see cref="StringComparison.OrdinalIgnoreCase"/> is correct. On a case-SENSITIVE filesystem —
+    /// the Linux containers ADR-0010 targets — they are <b>different</b> directories, so a key
+    /// resolving to <c>.../data/x</c> under a <c>.../Data</c> root is a genuine escape that
+    /// <see cref="StringComparison.Ordinal"/> correctly rejects; the previous unconditional
+    /// <c>OrdinalIgnoreCase</c> silently allowed it. <see cref="ResolvePath"/> passes
+    /// <paramref name="filesystemIsCaseSensitive"/> = <c>!OperatingSystem.IsWindows()</c>. Both
+    /// <paramref name="candidateFullPath"/> and <paramref name="rootFullPath"/> must already be
+    /// <c>Path.GetFullPath</c>-normalized (as they are at the call site).
+    /// </summary>
+    public static bool IsPathWithinRoot(string candidateFullPath, string rootFullPath, bool filesystemIsCaseSensitive)
+    {
+        var rootWithSeparator = rootFullPath.EndsWith(Path.DirectorySeparatorChar)
+            ? rootFullPath
+            : rootFullPath + Path.DirectorySeparatorChar;
+        var comparison = filesystemIsCaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+        return candidateFullPath.StartsWith(rootWithSeparator, comparison);
     }
 }

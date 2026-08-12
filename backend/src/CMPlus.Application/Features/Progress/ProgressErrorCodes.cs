@@ -11,4 +11,11 @@ public static class ProgressErrorCodes
     /// <summary>One or more <c>ActivityId</c> values in the batch do not belong to this project -
     /// the whole batch is rejected (all-or-nothing, S4-BE-03 DoD), not just the offending rows.</summary>
     public const string UnknownActivity = "ProgressUnknownActivity";
+
+    /// <summary>Security review sprint-15.md L-01b: the caller has no resolvable user id
+    /// (<c>ICurrentUserContext.UserId</c> is null) - the batch's <c>ActivityProgressLog</c> rows must
+    /// never be stamped with a fabricated <see cref="Guid.Empty"/> actor. Structurally unreachable
+    /// behind <c>[Authorize]</c> in production; kept as a fail-closed guard, mirroring
+    /// <c>WeatherLogErrorCodes.ActorRequired</c>. Maps to 401.</summary>
+    public const string ActorRequired = "ProgressActorRequired";
 }

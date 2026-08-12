@@ -28,5 +28,20 @@ export function createInMemoryOutboxStorage(): OutboxStorageAdapter {
     async delete(id) {
       items.delete(id)
     },
+    // Atomic in this single-threaded double by construction: the read and the conditional write both
+    // run to completion synchronously within this one async tick, so nothing can interleave — the
+    // same lost-update-proof property the real adapter gets from a readwrite transaction (N-02).
+    async mutate(id, apply) {
+      const current = items.get(id)
+      if (current === undefined) {
+        return false
+      }
+      const next = apply({ ...current })
+      if (next === undefined) {
+        return false
+      }
+      items.set(id, { ...next })
+      return true
+    },
   }
 }

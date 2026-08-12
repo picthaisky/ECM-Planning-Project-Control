@@ -75,12 +75,16 @@ public static class ResultProblemMapper
             // this specific kind of import - a genuine request-level rejection (never a Failed job),
             // since the request never reaches the point of creating one.
             [ImportErrorCodes.Forbidden] = (StatusCodes.Status403Forbidden, "import-forbidden", "Your role is not permitted to perform this import."),
+            // Security review sprint-15.md L-01b.
+            [ImportErrorCodes.ActorRequired] = (StatusCodes.Status401Unauthorized, "import-actor-required", "The current request has no resolvable authenticated user."),
 
             // S4-BE-01..03: WBS tree read, Project master-data edit, batch progress write.
             [WbsErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
             [ProjectErrorCodes.NotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
             [ProgressErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
             [ProgressErrorCodes.UnknownActivity] = (StatusCodes.Status400BadRequest, "progress-unknown-activity", "One or more ActivityId values do not belong to this project."),
+            // Security review sprint-15.md L-01b.
+            [ProgressErrorCodes.ActorRequired] = (StatusCodes.Status401Unauthorized, "progress-actor-required", "The current request has no resolvable authenticated user."),
 
             // S4-BE-05: activities-under-a-node read (GetNodeActivitiesQuery).
             [WbsErrorCodes.NodeNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
@@ -110,6 +114,8 @@ public static class ResultProblemMapper
             [ActualCostErrorCodes.ActivityNotFound] = (StatusCodes.Status400BadRequest, "actual-cost-activity-not-found", "The activity does not belong to this project."),
             [ActualCostErrorCodes.ReversedEntryNotFound] = (StatusCodes.Status400BadRequest, "actual-cost-reversed-entry-not-found", "ReversesEntryId does not reference an existing cost entry in this project."),
             [ActualCostErrorCodes.NoteRequiredForClosedPeriod] = (StatusCodes.Status422UnprocessableEntity, "actual-cost-note-required-for-closed-period", "A note is required when posting a cost entry into an already-closed EVM period."),
+            // Security review sprint-15.md L-01b.
+            [ActualCostErrorCodes.ActorRequired] = (StatusCodes.Status401Unauthorized, "actual-cost-actor-required", "The current request has no resolvable authenticated user."),
 
             // S8-BE-01: GetCashFlowQuery.
             [CashFlowErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),

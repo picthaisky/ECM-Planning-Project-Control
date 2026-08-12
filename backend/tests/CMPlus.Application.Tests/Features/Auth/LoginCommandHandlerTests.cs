@@ -19,9 +19,23 @@ public class LoginCommandHandlerTests
     /// (Infrastructure); this handler test only needs IPasswordHasher's contract honoured.</summary>
     private sealed class FakePasswordHasher : IPasswordHasher
     {
+        public bool VerifyWasCalled { get; private set; }
+
+        public bool VerifyDummyWasCalled { get; private set; }
+
         public string Hash(string password) => $"hash::{password}";
 
-        public bool Verify(string hash, string password) => hash == $"hash::{password}";
+        public bool Verify(string hash, string password)
+        {
+            VerifyWasCalled = true;
+            return hash == $"hash::{password}";
+        }
+
+        public bool VerifyDummy(string password)
+        {
+            VerifyDummyWasCalled = true;
+            return false;
+        }
     }
 
     private sealed class FakeJwtTokenService : IJwtTokenService
@@ -71,5 +85,37 @@ public class LoginCommandHandlerTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("InvalidCredentials", result.Error);
+    }
+
+    /// <summary>
+    /// sprint-15-owasp.md L-01: the generic error already hides *which* half failed, but a timing tell
+    /// remained — an unknown email used to skip the (expensive) password verification entirely, so it
+    /// returned faster than a known-email/wrong-password attempt, letting login enumerate accounts. The
+    /// fix runs an equal-cost <see cref="IPasswordHasher.VerifyDummy"/> on the unknown-email path. This
+    /// proves the hashing work happens on BOTH paths at the behavioural level (which method is invoked),
+    /// since a wall-clock timing assertion would be inherently flaky.
+    /// </summary>
+    [Fact]
+    public async Task Login_Performs_Password_Hashing_On_Both_The_Unknown_Email_And_Wrong_Password_Paths()
+    {
+        // Unknown email → VerifyDummy is invoked (equal-cost), Verify is not (there is no user).
+        var unknownHasher = new FakePasswordHasher();
+        var unknownHandler = new LoginCommandHandler(new FakeUserReader(null), unknownHasher, new FakeJwtTokenService());
+        var unknown = await unknownHandler.Handle(new LoginCommand("nobody@tenant.dev", "whatever"), CancellationToken.None);
+        Assert.True(unknown.IsFailure);
+        Assert.True(unknownHasher.VerifyDummyWasCalled, "Unknown email must still spend the hashing cost (VerifyDummy).");
+        Assert.False(unknownHasher.VerifyWasCalled);
+
+        // Known email, wrong password → Verify is invoked; VerifyDummy is not.
+        var user = new UserAuthRecord(Guid.NewGuid(), Guid.NewGuid(), "pm@tenant.dev", UserRole.PM, "hash::Secret123!");
+        var knownHasher = new FakePasswordHasher();
+        var knownHandler = new LoginCommandHandler(new FakeUserReader(user), knownHasher, new FakeJwtTokenService());
+        var known = await knownHandler.Handle(new LoginCommand("pm@tenant.dev", "WrongPassword"), CancellationToken.None);
+        Assert.True(known.IsFailure);
+        Assert.True(knownHasher.VerifyWasCalled);
+        Assert.False(knownHasher.VerifyDummyWasCalled);
+
+        // Both return the same generic error — the content oracle stays closed too.
+        Assert.Equal(unknown.Error, known.Error);
     }
 }

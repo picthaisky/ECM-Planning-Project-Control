@@ -35,16 +35,28 @@ import type { OutboxOwner } from './types'
  * everything they had was already blob-less).
  */
 export async function quarantineOwnerBlobs(storage: OutboxStorageAdapter, owner: OutboxOwner): Promise<number> {
-  const all = await storage.list()
-  const toQuarantine = all.filter(
-    (item) => item.ownerUserId === owner.userId && item.ownerTenantId === owner.tenantId && item.blob !== null,
+  // list() is only used to find *which* records belong to the signing-out owner. The actual blob-null
+  // is applied through storage.mutate(), which re-reads each record inside a readwrite transaction and
+  // clears only its blob — so a concurrent markSynced() landing between the list and the write is NOT
+  // reverted (Sprint 12 security review N-02: the previous list-snapshot-then-put shape wrote the whole
+  // stale item back, reverting a just-synced record to status=syncing/serverId=null and stranding a
+  // photo the server already held). The per-record guard `current.blob === null ? undefined : ...`
+  // also makes this idempotent and a genuine no-op for an already-blob-less record.
+  const owned = (await storage.list()).filter(
+    (item) => item.ownerUserId === owner.userId && item.ownerTenantId === owner.tenantId,
   )
 
-  for (const item of toQuarantine) {
-    await storage.put({ ...item, blob: null })
+  let cleared = 0
+  for (const { id } of owned) {
+    const wrote = await storage.mutate(id, (current) =>
+      current.blob === null ? undefined : { ...current, blob: null },
+    )
+    if (wrote) {
+      cleared += 1
+    }
   }
 
-  return toQuarantine.length
+  return cleared
 }
 
 /** Default bound on how long a `synced` record's metadata (caption, `fileName`, `capturedAt`, etc.)

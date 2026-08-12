@@ -29,7 +29,12 @@ public sealed class BatchRecordProgressCommandHandler(
             return Result<BatchRecordProgressResultDto>.Failure(ProgressErrorCodes.UnknownActivity);
         }
 
-        var actorUserId = currentUser.UserId ?? Guid.Empty;
+        // Security review sprint-15.md L-01b: fail closed on a null actor id rather than fabricating
+        // Guid.Empty - structurally unreachable behind [Authorize] but never trusted here either.
+        if (currentUser.UserId is not { } actorUserId)
+        {
+            return Result<BatchRecordProgressResultDto>.Failure(ProgressErrorCodes.ActorRequired);
+        }
 
         // US-4.5/ADR-0009: every row goes through Activity.RecordProgress - the only path that may
         // append an ActivityProgressLog entry or move the ProgressPercentage cache. All entries

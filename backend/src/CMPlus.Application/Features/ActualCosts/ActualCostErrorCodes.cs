@@ -26,4 +26,13 @@ public static class ActualCostErrorCodes
     /// once a <c>Note</c> is supplied - <c>EvmPeriodSnapshot</c> is never touched either way.
     /// </summary>
     public const string NoteRequiredForClosedPeriod = "ActualCostNoteRequiredForClosedPeriod";
+
+    /// <summary>Security review sprint-15.md L-01b: the caller has no resolvable user id
+    /// (<c>ICurrentUserContext.UserId</c> is null) - <c>ActualCostEntry.PostedByUserId</c> must
+    /// never be fabricated as <see cref="Guid.Empty"/>. Structurally unreachable behind
+    /// <c>[Authorize]</c> in production; kept as a fail-closed guard, mirroring
+    /// <c>WeatherLogErrorCodes.ActorRequired</c>/<c>PaymentApprovalErrorCodes.ActorRequired</c> -
+    /// a <c>Guid.Empty</c> actor on an append-only cost ledger row is evidentially worthless. Maps
+    /// to 401.</summary>
+    public const string ActorRequired = "ActualCostActorRequired";
 }

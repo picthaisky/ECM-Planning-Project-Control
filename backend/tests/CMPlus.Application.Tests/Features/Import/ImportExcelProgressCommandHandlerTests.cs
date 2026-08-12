@@ -216,4 +216,26 @@ public class ImportExcelProgressCommandHandlerTests
         Assert.DoesNotContain("some internal detail", result.Value.ErrorJson);
         Assert.NotNull(repository.SavedFailedJob);
     }
+
+    [Fact]
+    public async Task Handle_Fails_Closed_With_ActorRequired_On_A_Null_UserId_Never_Fabricates_Guid_Empty()
+    {
+        // Security review sprint-15.md L-01b - the central assertion is the SECOND one: no job is
+        // ever saved with a fabricated actor. Constructed directly (not via CreateHandler) so the
+        // explicit `null` cannot be masked by a "generate one if absent" fallback.
+        var repository = new FakeImportRepository();
+        var importerThatMustNotRun = new ImporterMustNotBeCalled();
+        var handler = new ImportExcelProgressCommandHandler(
+            repository, importerThatMustNotRun, new FakeImportOptionsProvider(1024),
+            new FakeTenantProvider(Guid.NewGuid()), new FakeCurrentUserContext(null),
+            new FakeClock(DateTimeOffset.Parse("2026-07-28T00:00:00+00:00")));
+
+        var result = await handler.Handle(
+            new ImportExcelProgressCommand(Guid.NewGuid(), "x.xlsx", XlsxMagicBytes), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ImportErrorCodes.ActorRequired, result.Error);
+        Assert.Null(repository.SavedFailedJob);
+        Assert.Null(repository.SavedProgressImport);
+    }
 }

@@ -53,4 +53,14 @@ public static class ImportErrorCodes
     /// this kind of import (schedule vs progress each have their own allowed-role set - see
     /// <c>ImportController</c>'s remarks). Application/controller-layer enforcement, not UI-only.</summary>
     public const string Forbidden = "ImportForbidden";
+
+    /// <summary>Security review sprint-15.md L-01b: the caller has no resolvable user id
+    /// (<c>ICurrentUserContext.UserId</c> is null) - <c>FileImportJob</c>'s actor field must never be
+    /// fabricated as <see cref="Guid.Empty"/>. Structurally unreachable behind <c>[Authorize]</c> in
+    /// production; kept as a fail-closed guard, mirroring <c>WeatherLogErrorCodes.ActorRequired</c> -
+    /// a <c>Guid.Empty</c> actor on an import job (and, for the progress path, the
+    /// <c>ActivityProgressLog</c> rows it creates) is evidentially worthless. Shared by both
+    /// <c>ImportScheduleFileCommandHandler</c> and <c>ImportExcelProgressCommandHandler</c>, same as
+    /// every other code in this class. Maps to 401.</summary>
+    public const string ActorRequired = "ImportActorRequired";
 }

@@ -20,7 +20,16 @@ public sealed class LoginCommandHandler(
     public async Task<Result<LoginResult>> Handle(LoginCommand request, CancellationToken cancellationToken)
     {
         var user = await userReader.FindByEmailAsync(request.Email.Trim().ToLowerInvariant(), cancellationToken);
-        if (user is null || !passwordHasher.Verify(user.PasswordHash, request.Password))
+
+        // Always spend the password-hashing cost, even when the email is unknown (VerifyDummy), so the
+        // response time does not reveal whether an account exists — closing the enumeration timing
+        // oracle the generic error message alone does not (sprint-15-owasp.md L-01). Both branches then
+        // fold into the same generic failure below.
+        var passwordMatches = user is not null
+            ? passwordHasher.Verify(user.PasswordHash, request.Password)
+            : passwordHasher.VerifyDummy(request.Password);
+
+        if (user is null || !passwordMatches)
         {
             return Result<LoginResult>.Failure(InvalidCredentials);
         }

@@ -211,4 +211,22 @@ public class RecordActualCostCommandHandlerTests
         Assert.True(result.IsSuccess);
         Assert.Equal(-600_000.00m, repository.AddedEntry!.Amount);
     }
+
+    [Fact]
+    public async Task Handle_Fails_Closed_With_ActorRequired_On_A_Null_UserId_Never_Fabricates_Guid_Empty()
+    {
+        // Security review sprint-15.md L-01b - the central assertion is the SECOND one: no entry is
+        // ever added with a fabricated actor. Constructed directly (not via CreateHandler) so the
+        // explicit `null` cannot be masked by a "generate one if absent" fallback.
+        var repository = new FakeActualCostRepository();
+        var handler = new RecordActualCostCommandHandler(
+            repository, new FakeTenantProvider(Guid.NewGuid()), new FakeCurrentUserContext(null), new FakeClock(DateTimeOffset.UtcNow));
+
+        var result = await handler.Handle(DefaultCommand(), CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ActualCostErrorCodes.ActorRequired, result.Error);
+        Assert.Equal(0, repository.AddCallCount);
+        Assert.Null(repository.AddedEntry);
+    }
 }

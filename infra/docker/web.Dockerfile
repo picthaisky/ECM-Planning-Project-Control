@@ -17,6 +17,13 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci
 
 COPY web/ .
+
+# S13-DO-01 (ADR-0005 US-13.1): the Service Worker cache version is stamped from VITE_BUILD_ID at
+# build time (vite.config.ts). Passed in as a build-arg by CI's image job (--build-arg
+# VITE_BUILD_ID=<sha>); when unset (a bare `docker build` locally) vite.config.ts falls back to a
+# dev-<timestamp> so the build still succeeds and the SW still versions, just not from the commit.
+ARG VITE_BUILD_ID=""
+ENV VITE_BUILD_ID=${VITE_BUILD_ID}
 RUN npm run build
 
 # ---- Runtime stage: static files served by nginx, not the Node toolchain ----

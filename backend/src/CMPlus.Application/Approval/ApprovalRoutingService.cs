@@ -27,8 +27,15 @@ namespace CMPlus.Application.Approval;
 /// <item>Fail closed: an empty resolved chain returns
 ///   <see cref="Result{T}.Failure"/>(<see cref="ApprovalErrorCodes.PolicyGap"/>) - never an
 ///   auto-approve.</item>
-/// <item>If no policy exists for the tenant/document type at all, fall back to a single
-///   mandatory <see cref="UserRole.ProjectDirector"/> step - restrictive, not permissive.</item>
+/// <item>If no policy exists for the tenant/document type at all
+///   (<see cref="ApprovalRoutingRequest.CandidatePolicies"/> is empty), fall back to a single
+///   mandatory <see cref="UserRole.ProjectDirector"/> step - restrictive, not permissive. N-06
+///   (docs/security/reviews/sprint-10.md §10.8): this fallback is reserved strictly for that
+///   genuine "no policy at all" case. When candidates were supplied but none applies to this
+///   request (e.g. only project-scoped overrides for other projects, or a policy version no
+///   longer active/effective), that is a misconfigured tenant, not "no policy configured" - it
+///   also fails closed with <see cref="ApprovalErrorCodes.PolicyGap"/>, never the permissive
+///   fallback.</item>
 /// </list>
 /// Rule-band non-overlap/gap-free validation (approval-workflow.md §5.3 step 7) is enforced by
 /// <see cref="ApprovalPolicy"/> itself at construction/versioning time, not here. Re-resolution on
@@ -48,6 +55,22 @@ public sealed class ApprovalRoutingService : IApprovalRoutingService
 
         if (policy is null)
         {
+            // N-06 (docs/security/reviews/sprint-10.md §10.8): the permissive single-ProjectDirector
+            // FallbackChain is reserved STRICTLY for approval-workflow.md §5.3 step 6's genuine "this
+            // tenant has no policy at all for this document type" case - request.CandidatePolicies is
+            // empty. When candidates were supplied (policies exist for this tenant+document type -
+            // e.g. project-scoped overrides for OTHER projects, or a future deactivate-without-replace
+            // path) but SelectPolicy still could not find one that applies here, that is a
+            // misconfigured/ambiguous tenant, not "no policy configured" - silently substituting the
+            // permissive fallback would route a money-moving document through a weak 1-step chain
+            // instead of failing closed. Fail closed with the same PolicyGap (422) an empty resolved
+            // chain already returns below, rather than auto-approving through the restrictive-looking
+            // but still real fallback.
+            if (request.CandidatePolicies.Count > 0)
+            {
+                return Result<ApprovalChainResolution>.Failure(ApprovalErrorCodes.PolicyGap);
+            }
+
             return Result<ApprovalChainResolution>.Success(new ApprovalChainResolution(
                 routingAmount, Guid.Empty, 0, FallbackChain, EscalationApplied: false, AllowSelfApproval: false));
         }

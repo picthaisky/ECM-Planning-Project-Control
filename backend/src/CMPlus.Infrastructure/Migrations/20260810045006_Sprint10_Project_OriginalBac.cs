@@ -26,8 +26,14 @@ namespace CMPlus.Infrastructure.Migrations
                 nullable: true);
 
             // H-02 backfill: every row that exists when this migration runs gets OriginalBac = its own
-            // current BAC - correct because no VariationOrder can exist yet, so BAC cannot yet have
-            // drifted from its original, as-baselined figure for any row.
+            // current BAC. This is safe not because the VariationOrders table doesn't exist yet (an
+            // earlier migration, Sprint10_VariationOrder, already created it), but because none of these
+            // migrations has ever been applied — they run as one batch against a fresh database, and the
+            // application (the only thing that approves a VariationOrder and thereby moves BAC) cannot
+            // start until every migration has applied. So at the instant this UPDATE runs, no approved
+            // VO has moved any row's BAC away from its original, as-baselined figure. If this migration
+            // is ever applied to a database with real history, run the ADR-0021-style pre-flight check
+            // first (no row where BAC already differs from its intended OriginalBac).
             migrationBuilder.Sql(
                 "UPDATE [Projects] SET [OriginalBac] = [BAC] WHERE [OriginalBac] IS NULL;");
 

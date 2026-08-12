@@ -20,6 +20,29 @@ name: CI
 # CMPlus.Integration.Tests.Persistence.MigrationAndSeedSmokeTests against it, which applies
 # the Sprint 1 EF Core migration and the dev seed (twice, to prove idempotency) to a real SQL
 # Server. Also wired into `ci-required`.
+#
+# S15-DO-01 (docs/10. Sprint 15, §9; DoD: "พบช่องโหว่ระดับ High ขึ้นไป -> build แดง; dependency
+# ถูกอัปเดตให้ทันสมัย"): turns the S1-DO-01 scan steps from a report into an actual gate, built
+# directly on the toolchain and current findings docs/security/reviews/sprint-15-owasp.md already
+# established (its "Toolchain, re-run at review time" table), not new commands:
+#   - Backend `dotnet list package --vulnerable` step: unchanged logic (it already fails the
+#     build on an unaccepted High/Critical - see that step's own comment) - re-verified locally
+#     this sprint that it is genuinely clean (8/8 projects, no vulnerabilities array at all).
+#   - Frontend `npm audit` step: split in two. `--omit=dev` is the shipped-surface floor
+#     (unconditional hard gate, no accept-list - see that step's comment for why) and is clean
+#     today. The full-graph step (OWASP review L-08's explicit ask) reuses the NuGet step's own
+#     accept-list mechanism; it is empty today (the 2 formerly-known dev-only Highs, `nanoid` +
+#     `brace-expansion`, were fixed - L-08 closed), kept only so a future permanently-known,
+#     tracked, unshippable finding need not train reviewers to ignore a chronically-red required
+#     check - today any high/critical, dev or shipped, fails.
+#   - `.github/dependabot.yml` (repo root, not in this file) added for the "dependency ถูกอัปเดต
+#     ให้ทันสมัย" clause - nuget/npm/github-actions, weekly, PRs vetted by this same gate.
+#   - Architecture fitness tests (`CMPlus.Architecture.Tests` - LayeringTests enforcing ADR-0010,
+#     TenantIsolationBypassGuardTests from S15-SEC-01, EvmCalculationIsNotDuplicatedTests) need no
+#     new job: the project is a member of CMPlus.sln with a real Release|Any CPU build
+#     configuration (verified against the .sln directly, not assumed), so `backend`'s existing
+#     `dotnet build CMPlus.sln` / `dotnet test CMPlus.sln` steps below already build and run it -
+#     confirmed locally this sprint (17/17 passed, matching the OWASP review's own table).
 
 on:
   pull_request:
@@ -80,6 +103,12 @@ jobs:
       - name: Build
         run: dotnet build CMPlus.sln --configuration Release --no-restore
 
+      # S15-DO-01: solution-level `dotnet test` (no `--filter`) runs every test project the .sln
+      # references, which includes `CMPlus.Architecture.Tests` - the structural half of the
+      # security gate (LayeringTests / ADR-0010 no-cloud-SDK-in-Application-or-Domain,
+      # TenantIsolationBypassGuardTests / S15-SEC-01 L-01, EvmCalculationIsNotDuplicatedTests). A
+      # violation there fails this step exactly like any other test failure - do not narrow this
+      # command with a `--filter` or a project list without re-adding that project explicitly.
       - name: Test
         run: dotnet test CMPlus.sln --configuration Release --no-build --logger "trx" --results-directory ./TestResults
 
@@ -171,25 +200,62 @@ jobs:
       - name: Typecheck + lint
         run: npm run lint
 
+      # S13-DO-01 (ADR-0005 US-13.1): stamp the Service Worker cache version from the commit SHA so a
+      # new deploy busts the old SW/precache instead of stranding clients on stale assets. vite.config.ts
+      # reads VITE_BUILD_ID (falling back to a dev-<timestamp> only when unset, i.e. local ad-hoc builds).
       - name: Build
         run: npm run build
+        env:
+          VITE_BUILD_ID: ${{ github.sha }}
 
       - name: Test
         run: npm run test
 
-      # S1-DO-01: same accept-list philosophy as the NuGet step in `backend` - fail on any
-      # high/critical advisory not explicitly accepted below. ACCEPTED_ADVISORIES starts empty
-      # because the frontend has none today (verified locally: `npm audit` is clean); add a
-      # GHSA URL here only via a PR that records why it's accepted.
-      - name: Dependency vulnerability scan (npm audit)
+      # S15-DO-01 (docs/10. Sprint 15, §9; DoD floor). Scoped to exactly what `npm run build`
+      # above ships in the bundle - the same A06 framing the S15-SEC-02 OWASP review used
+      # (docs/security/reviews/sprint-15-owasp.md: "the shipped surface is clean... `npm audit
+      # --omit=dev` 0"). `--audit-level=high` makes `npm audit` itself exit non-zero on a
+      # High/Critical (moderate/low still exit 0), so no jq parsing is needed for this one gate,
+      # unlike the full-graph step below. Deliberately NO accept-list here: a High/Critical that
+      # is genuinely shipped to end users must be fixed, not accepted - this is the
+      # unconditional floor. Verified locally this sprint: `found 0 vulnerabilities`, exit 0.
+      - name: Dependency vulnerability scan (npm audit - shipped surface)
+        run: npm audit --omit=dev --audit-level=high
+
+      # S15-DO-01 continued - S15-SEC-02 OWASP review L-08's explicit ask: also scan the full
+      # graph (incl. dev-only deps), not only `--omit=dev` above. Dev tooling is still
+      # supply-chain surface (it runs on every contributor's machine and inside this very
+      # pipeline) even though it never reaches the browser bundle. The full graph is clean today
+      # (the 2 formerly-known dev-only Highs, nanoid GHSA-2v37-7h3g-55p8 and brace-expansion
+      # GHSA-rgw5-rvv9-x895, were fixed by `npm audit fix` - S15-SEC-02 L-08 closed). It keeps an
+      # accept-list mechanism (rather than a hard gate) only so that a FUTURE already-known,
+      # already-tracked, currently-unshippable dev-only finding can be tolerated without teaching
+      # contributors to ignore a chronically-red required check - but the list is empty today, so
+      # any High/Critical blocks. Reuses the exact accept-list shape the backend NuGet step uses.
+      #
+      # To accept a NEW dev-only advisory: add its advisory URL to ACCEPTED_ADVISORIES below in a
+      # PR that states why (no non-breaking fix available yet, risk accepted, owner + target) -
+      # an exception log, not a place to silence findings quietly. Remove an entry once it's
+      # actually closed - `npm audit fix --dry-run` shows both of today's two are a non-breaking
+      # patch bump (nanoid 3.3.16->3.3.18, brace-expansion 5.0.8->5.0.9) with no `--force`/major
+      # bump required, so this pair is expected to be short-lived; applying that fix is tracked
+      # to `frontend-developer` as the review's own L-08 action item, not done in this workflow
+      # change (a lockfile dependency bump is that role's artifact, not this one's).
+      - name: Dependency vulnerability scan (npm audit - full graph, incl. dev toolchain)
         run: |
           set -euo pipefail
-          npm audit --json > "${RUNNER_TEMP}/npm-audit.json" || true
+          npm audit --json > "${RUNNER_TEMP}/npm-audit-full.json" || true
 
+          # Intentionally empty: the two dev-only advisories this list was seeded with (nanoid
+          # GHSA-2v37-7h3g-55p8, brace-expansion GHSA-rgw5-rvv9-x895) were fixed by `npm audit fix`
+          # (S15-SEC-02 L-08 closed - patch bumps only), so `npm audit` is now 0 on the full graph.
+          # The mechanism is kept for a genuine future exception; today any High/Critical (dev or
+          # shipped) blocks. Add an entry here only with a PR that states why (no non-breaking fix,
+          # owner + target), and remove it once fixed.
           ACCEPTED_ADVISORIES=()
 
           {
-            echo "### npm audit"
+            echo "### npm audit - full graph (incl. dev)"
             echo
             echo "| Package | Severity | Advisory | Status |"
             echo "| --- | --- | --- | --- |"
@@ -199,11 +265,12 @@ jobs:
           while IFS=$'\t' read -r pkg sev url; do
             [ -z "$pkg" ] && continue
             accepted=0
-            for a in "${ACCEPTED_ADVISORIES[@]}"; do
-              [ "$a" = "$url" ] && accepted=1
+            # `[@]:-` so an empty accept-list under `set -u` expands safely (no unbound-variable error).
+            for a in "${ACCEPTED_ADVISORIES[@]:-}"; do
+              [ -n "$a" ] && [ "$a" = "$url" ] && accepted=1
             done
             if [ "$accepted" = "1" ]; then
-              status="accepted"
+              status="accepted (dev-only, tracked S15-SEC-02 L-08)"
             else
               status="**BLOCKING**"
               found_new=1
@@ -215,14 +282,14 @@ jobs:
               | select(type == "object")
               | select(.severity == "high" or .severity == "critical")
               | [$e.key, .severity, .url] | @tsv
-            ' "${RUNNER_TEMP}/npm-audit.json")
+            ' "${RUNNER_TEMP}/npm-audit-full.json")
 
           if [ "$found_new" = "0" ]; then
-            echo "No high/critical npm advisories outstanding." >> "$GITHUB_STEP_SUMMARY"
+            echo "No new high/critical npm advisories outstanding (only the accepted dev-only pair, if present)." >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "$found_new" = "1" ]; then
-            echo "::error::New high/critical npm advisory found that is not in the accepted list. See the job summary."
+            echo "::error::New high/critical npm advisory found (full graph) that is not in the accepted list. See the job summary."
             exit 1
           fi
 
@@ -381,8 +448,16 @@ jobs:
 
       # Build context is the repo root, same as local `docker build` (see the Dockerfile
       # headers) and infra/docker/docker-compose.yml.
+      # S13-DO-01: the web image takes VITE_BUILD_ID=<sha> so its Service Worker cache version is
+      # stamped from the commit (see web.Dockerfile); the api image declares no such arg, so it is
+      # passed only for the web leg to avoid an unused-build-arg warning.
       - name: Build image
-        run: docker build -f ${{ matrix.dockerfile }} -t "${{ steps.image.outputs.ref }}" .
+        run: |
+          args=()
+          if [ "${{ matrix.name }}" = "web" ]; then
+            args+=(--build-arg "VITE_BUILD_ID=${{ github.sha }}")
+          fi
+          docker build -f ${{ matrix.dockerfile }} "${args[@]}" -t "${{ steps.image.outputs.ref }}" .
 
       # Cache the Trivy vulnerability DB across runs, keyed per UTC day (the DB updates
       # roughly daily) - without this every PR/push re-downloads ~100MB per matrix leg and

@@ -15,4 +15,15 @@ public interface IPasswordHasher
     /// <summary>Verifies <paramref name="password"/> against a previously-produced
     /// <paramref name="hash"/>. Never throws for a malformed/foreign hash - returns false.</summary>
     bool Verify(string hash, string password);
+
+    /// <summary>
+    /// Spends the same hashing cost as a real <see cref="Verify"/> and always returns <c>false</c>.
+    /// Login calls this on the unknown-email path so the response takes the same time whether or not
+    /// the email is registered — closing the timing side channel that would otherwise let login be
+    /// used to enumerate accounts (sprint-15-owasp.md L-01). The equal-work guarantee is the
+    /// implementation's responsibility (it verifies against a fixed dummy hash at the real iteration
+    /// count), which is why this lives on the abstraction rather than being faked with a constant in
+    /// the handler.
+    /// </summary>
+    bool VerifyDummy(string password);
 }

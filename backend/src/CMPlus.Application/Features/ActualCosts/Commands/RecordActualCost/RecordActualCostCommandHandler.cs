@@ -51,6 +51,13 @@ public sealed class RecordActualCostCommandHandler(
             return Result<ActualCostEntryDto>.Failure(ActualCostErrorCodes.NoteRequiredForClosedPeriod);
         }
 
+        // Security review sprint-15.md L-01b: fail closed on a null actor id rather than fabricating
+        // Guid.Empty - structurally unreachable behind [Authorize] but never trusted here either.
+        if (currentUser.UserId is not { } postedByUserId)
+        {
+            return Result<ActualCostEntryDto>.Failure(ActualCostErrorCodes.ActorRequired);
+        }
+
         var entry = new ActualCostEntry(
             tenantProvider.TenantId,
             request.ProjectId,
@@ -62,7 +69,7 @@ public sealed class RecordActualCostCommandHandler(
             request.Amount,
             request.IncurredDate,
             clock.UtcNow,
-            currentUser.UserId ?? Guid.Empty,
+            postedByUserId,
             request.ReversesEntryId,
             request.DocumentReference,
             request.CostCode,

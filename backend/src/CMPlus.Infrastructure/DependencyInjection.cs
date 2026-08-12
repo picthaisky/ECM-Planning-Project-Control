@@ -178,6 +178,11 @@ public static class DependencyInjection
             .ValidateOnStart();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();
 
+        // Readiness probe for /health/ready (scoped: it resolves the scoped CmPlusDbContext). Keeps
+        // the EF Core dependency inside Infrastructure so the WebApi health check depends only on the
+        // Application-layer IDatabaseConnectivityProbe abstraction (ADR-0001).
+        services.AddScoped<IDatabaseConnectivityProbe, DatabaseConnectivityProbe>();
+
         return services;
     }
 }

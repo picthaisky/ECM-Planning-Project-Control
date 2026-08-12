@@ -57,9 +57,12 @@ public sealed record ApprovalChainResolution(
 /// <param name="EscalationBaselineContractValue">
 /// ADR-0015 (Variation Order only; ignored for a Payment Certificate). The denominator of the
 /// cumulative-VO-escalation ratio $\Phi = (\Sigma^{VO} + Amount) / \text{this} \times 100$. <b>Must
-/// be the project's baseline contract value</b> - <c>Project.EscalationBaselineContractValue</c>
-/// (<c>OriginalContractValue ?? ContractValue</c>), fixed at signature and moved only by a formal
-/// contract amendment - <b>never</b> <c>Project.ContractValue</c> (the current, VO-inclusive sum).
+/// be the project's baseline contract value</b> - <c>Project.EscalationBaselineContractValue</c>,
+/// a trivial passthrough to the non-nullable <c>Project.OriginalContractValue</c>, fixed at signature
+/// and moved only by a formal contract amendment - <b>never</b> <c>Project.ContractValue</c> (the
+/// current, VO-inclusive sum). (The former <c>?? ContractValue</c> fallback was removed by the
+/// Sprint-10 H-02 fix, which made <c>OriginalContractValue</c> NOT NULL — a nullable baseline
+/// silently degrading to the live value reinstated the self-diluting-denominator defect below.)
 /// Renamed from the shipped <c>ContractValue</c> specifically to make that distinction impossible to
 /// miss at the call site: every approved VO raises <c>Project.ContractValue</c>, so wiring THAT field
 /// here makes the escalation trigger recede exactly as the contract drifts furthest from its

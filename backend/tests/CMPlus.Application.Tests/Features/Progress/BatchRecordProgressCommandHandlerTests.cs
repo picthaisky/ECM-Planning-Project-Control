@@ -122,4 +122,29 @@ public class BatchRecordProgressCommandHandlerTests
             Assert.True(activity.ProgressPercentage > 0m);
         }
     }
+
+    [Fact]
+    public async Task Handle_Fails_Closed_With_ActorRequired_On_A_Null_UserId_Never_Fabricates_Guid_Empty()
+    {
+        // Security review sprint-15.md L-01b - the central assertion is the SECOND one: no batch is
+        // ever saved with a fabricated actor. Constructed directly (not via CreateHandler) so the
+        // explicit `null` cannot be masked by a "generate one if absent" fallback.
+        var known = CreateActivity();
+        var repository = new FakeBatchProgressRepository
+        {
+            ActivitiesToReturn = new Dictionary<Guid, Activity> { [known.Id] = known },
+        };
+        var handler = new BatchRecordProgressCommandHandler(
+            repository, new FakeCurrentUserContext(null), new FakeClock(DateTimeOffset.UtcNow));
+
+        var command = new BatchRecordProgressCommand(
+            Guid.NewGuid(), DateTimeOffset.Parse("2026-07-27T00:00:00Z"), [new BatchProgressEntry(known.Id, 50m, null)]);
+
+        var result = await handler.Handle(command, CancellationToken.None);
+
+        Assert.True(result.IsFailure);
+        Assert.Equal(ProgressErrorCodes.ActorRequired, result.Error);
+        Assert.Null(repository.SavedBatch);
+        Assert.Equal(0m, known.ProgressPercentage);
+    }
 }

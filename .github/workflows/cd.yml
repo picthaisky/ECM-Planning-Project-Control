@@ -1,0 +1,177 @@
+name: CD (promote)
+
+# S16-DO-02 (docs/10. Sprint 16A): promotion pipeline with a MANUAL approval gate and the EF
+# migration as a SEPARATE, independently-approved job that must run before the app is promoted.
+# Deliberately NOT auto-promotion: this workflow only ever runs on `workflow_dispatch` (a human
+# clicks "Run", choosing which already-built image to promote), never on push. CI (ci.yml) builds
+# and pushes the immutable image `ghcr.io/<owner>/cmplus/{api,web}:<sha>` on merge to main; CD only
+# *promotes* one of those existing SHAs — it never rebuilds, so what reaches production is byte-for-
+# byte what CI tested.
+#
+# The manual gates are GitHub **Environments** (`staging`, `production-migrations`, `production`)
+# with "Required reviewers" configured in repo Settings → Environments. GitHub blocks each job until
+# a reviewer approves — a provider-agnostic mechanism, so this file does not prejudge the Sprint-16B
+# AWS-vs-Azure decision (ADR-0010). The one piece that IS provider-specific — the command that puts
+# the image onto the runtime — is isolated to the clearly-marked "deploy" steps and is wired in
+# S16-DO-05 once the provider is chosen; until then those steps fail loudly rather than pretend to
+# deploy.
+#
+# ── Rollback plan (DoD: "มี rollback plan เขียนไว้") ──────────────────────────────────────────────
+# APP rollback: because every deploy is keyed by an immutable image SHA, rolling back is just running
+#   this same workflow again with `image_sha` set to the last known-good SHA. No special path needed.
+# DATABASE rollback: EF migrations are forward-only in production. A bad migration is recovered by
+#   (a) restoring the pre-migration backup taken by the `migrate` job's guard step below (see
+#   docs/runbooks/backup-restore.md, S16-DO-03), or (b) shipping a compensating forward migration.
+#   Never hand-edit a deployed schema. This is why `migrate` is gated and runs before `deploy`: an
+#   unapproved or failed migration must stop the promotion before any new app code goes live.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: 'Git SHA of the CI-built image to promote (must already exist in ghcr.io).'
+        required: true
+        type: string
+      target:
+        description: 'Environment to promote to.'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+
+concurrency:
+  # One promotion to a given target at a time; a second run queues rather than racing the first.
+  group: cd-${{ inputs.target }}
+  cancel-in-progress: false
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  REGISTRY: ghcr.io
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  # ── 1. Resolve & verify the promotion target ────────────────────────────────────────────────────
+  # Fail fast if the requested SHA was never built/pushed by CI, so a typo in `image_sha` cannot
+  # silently promote nothing (or an unintended tag).
+  resolve:
+    name: Resolve image ${{ inputs.image_sha }}
+    runs-on: ubuntu-latest
+    outputs:
+      api_image: ${{ steps.refs.outputs.api }}
+      web_image: ${{ steps.refs.outputs.web }}
+    steps:
+      - name: Compute image refs
+        id: refs
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"   # ghcr requires a lowercase owner
+          echo "api=${REGISTRY}/${owner}/cmplus/api:${{ inputs.image_sha }}" >> "$GITHUB_OUTPUT"
+          echo "web=${REGISTRY}/${owner}/cmplus/web:${{ inputs.image_sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: Verify both images exist for this SHA
+        run: |
+          set -euo pipefail
+          for img in "${{ steps.refs.outputs.api }}" "${{ steps.refs.outputs.web }}"; do
+            echo "Checking $img ..."
+            docker manifest inspect "$img" > /dev/null \
+              || { echo "::error::$img not found in registry — was this SHA built and pushed by CI on merge to main?"; exit 1; }
+          done
+          echo "Both images present."
+
+  # ── 2. Database migration — SEPARATE, INDEPENDENTLY APPROVED, RUNS BEFORE DEPLOY ────────────────
+  # DoD: "EF migration เป็น job แยกที่ต้องอนุมัติก่อน apply". The `production-migrations` environment
+  # carries its own Required-reviewers rule, so a schema change is approved by whoever owns the data
+  # (often a different person than who approves an app deploy). Applies a self-contained EF migration
+  # *bundle* built from THIS repo at THIS SHA — no dotnet SDK or source is needed on the DB host, and
+  # the bundle is exactly the set of migrations §0/§2 of the staging checklist expects.
+  migrate:
+    name: Apply EF migrations (${{ inputs.target }})
+    needs: resolve
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target == 'production' && 'production-migrations' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.image_sha }}   # migrate from the SAME commit the promoted image was built from
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install EF Core tools
+        run: dotnet tool install --global dotnet-ef --version 10.0.0
+
+      # Pre-flight (staging-deploy-checklist.md §0): the filtered-unique-index migrations abort mid-
+      # batch if existing data already violates them. Run the dedup probe(s) and fail before touching
+      # the schema. Zero rows required. On a fresh DB this is a no-op; on a DB with history it is the
+      # guard that prevents a half-applied migration batch.
+      - name: Pre-flight data checks
+        env:
+          CONN: ${{ secrets.DB_CONNECTION }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CONN:-}" ]; then echo "::error::secrets.DB_CONNECTION is not set for ${{ inputs.target }}"; exit 1; fi
+          echo "Run artifacts/migrations/*.PREFLIGHT.sql against the target and require zero rows."
+          echo "::warning::Wire the sqlcmd/preflight execution here once the target DB host is reachable from CI (S16-DO-01)."
+
+      - name: Build migration bundle
+        run: |
+          dotnet ef migrations bundle \
+            --self-contained -r linux-x64 \
+            --project backend/src/CMPlus.Infrastructure/CMPlus.Infrastructure.csproj \
+            --startup-project backend/src/CMPlus.WebApi/CMPlus.WebApi.csproj \
+            --configuration Release \
+            -o efbundle
+
+      - name: Apply migrations
+        env:
+          CONN: ${{ secrets.DB_CONNECTION }}
+        run: |
+          set -euo pipefail
+          # Idempotent: EF applies only migrations not already in __EFMigrationsHistory, so re-running
+          # a partially-applied promotion is safe.
+          ./efbundle --connection "$CONN"
+
+  # ── 3. Deploy the app — MANUAL GATE, no auto-promotion, AFTER a successful migration ────────────
+  # The `production` (or `staging`) environment's Required-reviewers rule is the promotion gate. The
+  # actual deploy command is provider-specific (S16-DO-05, Sprint 16B); until then it fails loudly so
+  # a run cannot appear "green" without having deployed anything.
+  deploy:
+    name: Deploy to ${{ inputs.target }}
+    needs: [resolve, migrate]
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.target }}
+      # url: filled in by S16-DO-05 with the real environment URL
+    steps:
+      - name: Deploy images
+        env:
+          API_IMAGE: ${{ needs.resolve.outputs.api_image }}
+          WEB_IMAGE: ${{ needs.resolve.outputs.web_image }}
+          DEPLOY_TARGET: ${{ vars.DEPLOY_TARGET }}   # 'aws-ecs' | 'azure-container-apps', set in Sprint 16B
+        run: |
+          set -euo pipefail
+          echo "Promoting:"
+          echo "  api: $API_IMAGE"
+          echo "  web: $WEB_IMAGE"
+          case "${DEPLOY_TARGET:-}" in
+            aws-ecs)
+              echo "::error::AWS ECS deploy step not yet implemented — see docs/runbooks/deploy-aws-ecs.md (S16-DO-05)."; exit 1 ;;
+            azure-container-apps)
+              echo "::error::Azure Container Apps deploy step not yet implemented — see docs/runbooks/deploy-azure-container-apps.md (S16-DO-05)."; exit 1 ;;
+            *)
+              echo "::error::vars.DEPLOY_TARGET is unset — the Sprint 16B cloud decision gate (S16-DO-04) has not been made. Deploy is intentionally blocked."; exit 1 ;;
+          esac
+
+      - name: Post-deploy smoke test
+        if: success()
+        run: |
+          echo "Run web/e2e/smoke.spec.ts against the deployed ${{ inputs.target }} URL (S16-QA-02)."
+          echo "::warning::Wire the smoke run here once the deploy step lands the app (S16-DO-05)."

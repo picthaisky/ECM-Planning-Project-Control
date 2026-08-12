@@ -6,9 +6,12 @@ using CMPlus.Application.Abstractions;
 using CMPlus.Infrastructure;
 using CMPlus.WebApi.Auth;
 using CMPlus.WebApi.ErrorHandling;
+using CMPlus.WebApi.HealthChecks;
 using CMPlus.WebApi.Json;
 using CMPlus.WebApi.Middleware;
+using CMPlus.WebApi.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -69,7 +72,10 @@ builder.Services.AddControllers()
 builder.Services.AddOpenApi();
 
 // Health checks (ADR-0010: /health/live + /health/ready from Phase 0).
-builder.Services.AddHealthChecks();
+// The database readiness check (untagged → runs on /health/ready, not /health/live) closes the gap
+// S15-DO-02's cloud runbook flagged: without it /health/ready reported Healthy even with the DB down.
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("database");
 
 // S2-BE-03: ProblemDetails for every non-2xx MVC result (NotFound(), BadRequest(), the built-in
 // 400 model-validation response, etc.) - not only for unhandled exceptions, which
@@ -121,6 +127,13 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
             ValidateLifetime = true,
             ClockSkew = TimeSpan.Zero,
+            // Security review sprint-15.md L-02: the signing key is symmetric-only today (no
+            // asymmetric key exists anywhere in this codebase), so classic alg-confusion
+            // (RS256 public key mistaken for an HS256 secret) has no live surface yet - this is
+            // defense-in-depth that pins the one algorithm actually issued (JwtTokenService uses
+            // HmacSha256 exclusively) so a future asymmetric-key addition elsewhere in the pipeline
+            // can never silently reopen that class of attack via this validator.
+            ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
         };
 
         options.Events = new JwtBearerEvents
@@ -146,9 +159,32 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
         };
     });
 
-builder.Services.AddAuthorization();
+// Security review sprint-15.md L-05: without an explicit FallbackPolicy, an endpoint added in the
+// future without an [Authorize]/[AllowAnonymous] attribute of its own would default to anonymous
+// (ASP.NET Core's own framework default) - the exact "forgot to lock the door" class of bug A01
+// describes. Every one of today's 27 controllers is already explicitly [Authorize]'d (code-verified,
+// sprint-15-owasp.md §1.2), so this is latent hardening, not a live fix - but it is the cheapest
+// defense-in-depth available: a bare RequireAuthenticatedUser() policy applied to every endpoint that
+// does not already carry its own authorization metadata. The two routes that must stay reachable
+// without a token - /auth/login and both /health/* endpoints - carry an explicit AllowAnonymous
+// below/on the controller so this fallback never breaks them.
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+});
+
+// Security review sprint-15-owasp.md M-1: rate-limit POST /api/v1/auth/login against online
+// brute-force / credential-stuffing. Registers the ASP.NET Core rate-limiter services plus a
+// GlobalLimiter chaining a per-IP and a per-account (submitted email) sliding window, scoped to the
+// login route only - see LoginRateLimiterSetup for the numbers and the chained-limiter rationale.
+builder.Services.AddLoginRateLimiting();
 
 var app = builder.Build();
+
+// sprint-10.md L-06 / sprint-16.md S16-SEC-01: baseline security headers on EVERY response.
+// Outermost so its OnStarting callback is attached before any downstream path (including
+// UseExceptionHandler's error response and the rate limiter's 429) can produce bytes.
+app.UseMiddleware<SecurityHeadersMiddleware>();
 
 // S2-BE-03: catches everything not already handled below (bugs, infrastructure failures) and
 // renders a stable ProblemDetails body - registered first so it wraps the whole pipeline.
@@ -159,6 +195,13 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
+else
+{
+    // sprint-16.md S16-SEC-01: instruct browsers to pin HTTPS for future visits (production only -
+    // never in Development, where the app is reached over plain-HTTP localhost and an HSTS pin would
+    // wrongly persist in the developer's browser). Pairs with UseHttpsRedirection below.
+    app.UseHsts();
+}
 
 app.UseHttpsRedirection();
 
@@ -167,6 +210,13 @@ app.UseResponseCompression();
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+// Security review sprint-15-owasp.md M-1: the per-account limiter partition-key delegate is
+// synchronous and cannot read the request body, so this middleware peeks + rewinds the login body to
+// stash the normalized email in HttpContext.Items *before* UseRateLimiter() reads it. It is a cheap
+// no-op for every non-login request. Must precede UseRateLimiter().
+app.UseMiddleware<LoginEmailCaptureMiddleware>();
+app.UseRateLimiter();
 
 // S13-BE-01 (ADR-0005 US-13.1): Idempotency-Key support on the site-module write endpoints
 // ([Idempotent]-attributed actions only - see IdempotencyMiddleware's class remarks). Must run
@@ -184,13 +234,15 @@ app.MapControllers();
 
 // Liveness: process is up and serving requests - never runs dependency checks, so a DB
 // outage must not flip this and trigger an orchestrator restart loop.
-app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+// AllowAnonymous (L-05): an orchestrator/load-balancer probe carries no bearer token - without this,
+// the FallbackPolicy above would 401 every liveness/readiness check.
+app.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous();
 
 // Readiness: runs every registered health check. No dependency checks are registered directly in
 // WebApi (a DbContext health check would force an EF Core assembly reference here, which
 // CMPlus.Architecture.Tests explicitly forbids) - Infrastructure remains the only place that
 // talks to EF Core.
-app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = _ => true });
+app.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = _ => true }).AllowAnonymous();
 
 app.Run();
 

@@ -1,7 +1,14 @@
 import { AxiosError } from 'axios'
 import { apiClient } from '../../services/apiClient'
 import type { ProblemDetails } from '../auth/types'
-import type { ApprovalDocumentType, ApprovalPolicy, UpdateApprovalPolicyPayload } from './types'
+import type {
+  ApprovalDocumentType,
+  ApprovalPolicy,
+  ApprovalPolicyVersionHistoryEntry,
+  ApprovalRoutingSimulation,
+  SimulateApprovalRoutingPayload,
+  UpdateApprovalPolicyPayload,
+} from './types'
 
 /** Thrown by every function in this module with a Thai-first message ready to render directly —
  * mirrors `features/payment/api.ts`'s `PaymentApiError`/`features/evm/api.ts`'s `EvmApiError`. */
@@ -111,5 +118,111 @@ export async function updateApprovalPolicy(
       }
     }
     throw toTenantAdminApiError(error)
+  }
+}
+
+/**
+ * `GET /api/v1/tenants/{tenantId}/approval-policies/{documentType}/history` (S15-BE-01) — real,
+ * live endpoint. Every version ever created for this document type, assembled server-side from
+ * `ApprovalPolicy` + `AuditLog` (no new storage) — an empty array is a legitimate, successful
+ * answer (`GetApprovalPolicyVersionHistoryQueryHandler`'s own remarks), never a "not configured"
+ * 404 the way `getApprovalPolicy` above has to special-case.
+ */
+export async function getApprovalPolicyHistory(
+  tenantId: string,
+  documentType: ApprovalDocumentType,
+): Promise<ApprovalPolicyVersionHistoryEntry[]> {
+  try {
+    const response = await apiClient.get<ApprovalPolicyVersionHistoryEntry[]>(
+      `/tenants/${tenantId}/approval-policies/${documentType}/history`,
+    )
+    return response.data
+  } catch (error) {
+    throw toTenantAdminApiError(error)
+  }
+}
+
+/**
+ * S15-BE-01's simulate failures a real Submit would also hit with the same inputs
+ * (`ApprovalSimulationErrorCodes.cs`, `ApprovalErrorCodes.PolicyGap`/`ContractValueNotConfigured`,
+ * `ResultProblemMapper.cs`'s table) — widened into a distinct, machine-readable `code` rather than
+ * folded into `TenantAdminApiError`'s generic message, so `RoutingSimulatorPanel` can render "this
+ * project id does not exist in your tenant" differently from "no chain resolves for this amount"
+ * differently from "the project's baseline contract value is not configured" — three genuinely
+ * different, actionable outcomes for an Admin trialling a submission.
+ */
+export type SimulateApprovalRoutingErrorCode =
+  | 'ProjectNotFound'
+  | 'PolicyGap'
+  | 'ContractValueNotConfigured'
+  | 'Other'
+
+export class ApprovalRoutingSimulationApiError extends TenantAdminApiError {
+  readonly code: SimulateApprovalRoutingErrorCode
+
+  constructor(message: string, code: SimulateApprovalRoutingErrorCode, status?: number) {
+    super(message, status)
+    this.name = 'ApprovalRoutingSimulationApiError'
+    this.code = code
+  }
+}
+
+const SIMULATION_ERROR_MESSAGES: Record<Exclude<SimulateApprovalRoutingErrorCode, 'Other'>, string> = {
+  ProjectNotFound: 'ไม่พบโครงการนี้ในองค์กรของคุณ กรุณาตรวจสอบรหัสโครงการ (Project ID) อีกครั้ง',
+  PolicyGap:
+    'ไม่พบขั้นตอนอนุมัติที่ครอบคลุมจำนวนเงินนี้ — หากส่งเอกสารจริงในขณะนี้ ระบบจะปฏิเสธการส่ง (ไม่มีเส้นทางอนุมัติที่ resolve ได้)',
+  ContractValueNotConfigured:
+    'โครงการนี้ยังไม่ได้กำหนดมูลค่าสัญญาตั้งต้น (baseline contract value) จึงไม่สามารถประเมินเงื่อนไข escalation สะสมของ VO ได้',
+}
+
+// Matched on `ProblemDetails.detail` (the exact `Result` error code — `ApprovalSimulationProjectNotFound`
+// / `ApprovalPolicyGap` / `ContractValueNotConfigured`), not on the mapped `type` slug — several
+// unrelated codes share the same `not-found`/`approval-policy-gap` type family, so `detail` is the
+// only field precise enough to distinguish them (same discipline as `updateApprovalPolicy`'s
+// `body?.problem` check above).
+function toApprovalRoutingSimulationApiError(error: unknown): TenantAdminApiError {
+  if (error instanceof AxiosError) {
+    const status = error.response?.status
+    const detail = (error.response?.data as ProblemDetails | undefined)?.detail
+
+    if (detail === 'ApprovalSimulationProjectNotFound') {
+      return new ApprovalRoutingSimulationApiError(SIMULATION_ERROR_MESSAGES.ProjectNotFound, 'ProjectNotFound', status)
+    }
+    if (detail === 'ApprovalPolicyGap') {
+      return new ApprovalRoutingSimulationApiError(SIMULATION_ERROR_MESSAGES.PolicyGap, 'PolicyGap', status)
+    }
+    if (detail === 'ContractValueNotConfigured') {
+      return new ApprovalRoutingSimulationApiError(
+        SIMULATION_ERROR_MESSAGES.ContractValueNotConfigured,
+        'ContractValueNotConfigured',
+        status,
+      )
+    }
+  }
+  return toTenantAdminApiError(error)
+}
+
+/**
+ * `POST /api/v1/tenants/{tenantId}/approval-policies/{documentType}/simulate` (S15-BE-01) — real,
+ * live endpoint. Resolves the exact chain a real Submit would produce right now for a hypothetical
+ * `payload.amount` against a real `payload.projectId`, without creating any document
+ * (`SimulateApprovalRoutingQueryHandler`'s own remarks: the identical `IApprovalPolicyReader` ->
+ * `IApprovalRoutingService.Resolve` path a real Submit uses). A "this submission would be blocked"
+ * result (`PolicyGap`/`ContractValueNotConfigured`) is thrown as a typed
+ * `ApprovalRoutingSimulationApiError`, not swallowed — that outcome IS the honest simulation result.
+ */
+export async function simulateApprovalRouting(
+  tenantId: string,
+  documentType: ApprovalDocumentType,
+  payload: SimulateApprovalRoutingPayload,
+): Promise<ApprovalRoutingSimulation> {
+  try {
+    const response = await apiClient.post<ApprovalRoutingSimulation>(
+      `/tenants/${tenantId}/approval-policies/${documentType}/simulate`,
+      payload,
+    )
+    return response.data
+  } catch (error) {
+    throw toApprovalRoutingSimulationApiError(error)
   }
 }

@@ -19,6 +19,19 @@ public sealed class Pbkdf2PasswordHasher : IPasswordHasher
     private const char Delimiter = '.';
     private const string Version = "v1";
 
+    // A real, self-describing hash of a fixed placeholder that no account can ever authenticate with,
+    // computed once at type load. VerifyDummy runs the identical PBKDF2 verify against it so the
+    // unknown-email login path spends the same CPU as a real credential check (sprint-15-owasp.md
+    // L-01). A fixed all-zero salt is fine here — this hash is not a secret and protects nothing; its
+    // only job is to cost the same as Verify.
+    private static readonly string DummyHash = string.Join(
+        Delimiter,
+        Version,
+        Iterations,
+        Convert.ToBase64String(new byte[SaltSizeBytes]),
+        Convert.ToBase64String(Rfc2898DeriveBytes.Pbkdf2(
+            "cmplus.login.timing.equalizer", new byte[SaltSizeBytes], Iterations, HashAlgorithmName.SHA256, KeySizeBytes)));
+
     public string Hash(string password)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(password);
@@ -56,5 +69,17 @@ public sealed class Pbkdf2PasswordHasher : IPasswordHasher
             // just fail verification (IPasswordHasher.Verify contract).
             return false;
         }
+    }
+
+    public bool VerifyDummy(string password)
+    {
+        // Mirror Verify exactly (same code path, same iteration count) against the fixed DummyHash, so
+        // the unknown-email login path is timing-indistinguishable from a real wrong-password check.
+        // Deliberately NOT coalescing an empty password: Verify short-circuits on an empty password
+        // (returning fast without hashing), so mirroring that short-circuit here keeps the two paths
+        // symmetric for every input rather than introducing a reverse timing tell. The result is
+        // discarded — this always fails.
+        _ = Verify(DummyHash, password);
+        return false;
     }
 }

@@ -91,5 +91,20 @@ Users can also trigger this manually with `/learn`.
   constrain schema shape), or if parallel is required, explicitly instruct both to keep schema
   proposals minimal/directional and leave concrete field naming to `system-architect` — see
   `.claude/knowledge/lessons/lessons-learned.md` (2026-07-27).
+- Never treat a passing test suite as proof a guard, invariant, or fix works. Before declaring a
+  security- or money-moving guard done, mutate the implementation and confirm a test fails, and
+  assert on the durable artifact (stored bytes, row counts, the persisted value), not an in-memory
+  return value — see `.claude/knowledge/lessons/lessons-learned.md` (2026-08-09, six verified
+  instances) and `/clean-architecture-dotnet`'s Testing patterns.
+- When a domain rule's reading changes money, time, or authority and cannot be derived unambiguously
+  from the code or docs, escalate to the human with a precise question and worked fixtures showing
+  how the answers diverge — never silently pick one reading and present it as settled — see
+  `.claude/knowledge/lessons/lessons-learned.md` (2026-08-10) and ADR-0015–ADR-0020.
+- For any authority/money/security control, a permissive or lenient fallback must be reachable ONLY
+  from a provably-empty input — never from "input existed but nothing was selected". Distinguish
+  "nothing configured" (safe default) from "something configured, none applies here" (a
+  misconfiguration: fail closed, block, make a human fix it). Collapsing the two silently downgrades
+  authority — see `.claude/knowledge/lessons/lessons-learned.md` (2026-08-12, N-06 fail-closed
+  routing) and ADR-0008.
 
 <!-- knowledge-curator appends promoted team-wide rules below this line -->
