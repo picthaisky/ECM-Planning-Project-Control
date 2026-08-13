@@ -50,6 +50,8 @@ const sampleDashboard: DashboardResponseDto = {
   eacNullReason: null,
   progressRollup: { progressPercentage: '54.20', weightWarnings: [], mixedScopeWbsNodeIds: [] },
   warnings: [],
+  cumulativeDisbursement: '0.00',
+  cumulativeWeatherStoppageDays: 0,
 }
 
 const sampleGantt: GanttDto = {

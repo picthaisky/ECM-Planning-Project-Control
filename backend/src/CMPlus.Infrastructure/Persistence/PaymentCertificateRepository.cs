@@ -23,6 +23,15 @@ public sealed class PaymentCertificateRepository(CmPlusDbContext dbContext) : IP
     public void AddLedgerEntries(IReadOnlyList<ProjectFinanceLedger> entries) =>
         dbContext.ProjectFinanceLedgers.AddRange(entries);
 
+    public Task AddAsync(PaymentCertificate certificate, CancellationToken cancellationToken = default)
+    {
+        // Pure insert of a new aggregate; the AuditSaveChangesInterceptor writes its one Created
+        // AuditLog row on the next SaveChanges (a single Added entity - not the 10,000-child bulk case
+        // BaselineRepository.AddAsync has to suppress). Persisted by TrySaveChangesAsync.
+        dbContext.PaymentCertificates.Add(certificate);
+        return Task.CompletedTask;
+    }
+
     /// <summary>
     /// Read-only sibling of <see cref="FindAsync"/> - see the interface's own remarks. "Newest
     /// first" orders by <see cref="PaymentCertificate.Id"/> (a UUIDv7, time-ordered by construction,

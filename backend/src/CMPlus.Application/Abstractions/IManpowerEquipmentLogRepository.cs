@@ -20,6 +20,14 @@ public interface IManpowerEquipmentLogRepository
     Task<IReadOnlyList<Guid>> FindExistingWorkCategoryIdsAsync(
         Guid projectId, IReadOnlyCollection<Guid> workCategoryIds, CancellationToken cancellationToken = default);
 
+    /// <summary>The active work-category catalogue a project can use - the tenant-wide defaults
+    /// (<c>ProjectId == null</c>) plus any project-specific entries - ordered by <c>DisplayOrder</c>
+    /// then <c>Code</c>. A read (<c>AsNoTracking</c>); tenant-scoped by the global query filter
+    /// (ADR-0002), so an unknown/cross-tenant project yields an empty list. The same
+    /// <c>ProjectId == null || ProjectId == projectId</c> visibility as
+    /// <see cref="FindExistingWorkCategoryIdsAsync"/>, but listing rather than validating.</summary>
+    Task<IReadOnlyList<WorkCategory>> ListWorkCategoriesForProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
+
     /// <summary>Of the given ids, the subset that are real <see cref="WBSNode"/> ids belonging to
     /// this project.</summary>
     Task<IReadOnlyList<Guid>> FindExistingWbsNodeIdsAsync(

@@ -79,6 +79,22 @@ internal sealed class FakeBaselineRepository : IBaselineRepository
     public Task<Domain.Entities.Baseline?> FindActiveAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         Task.FromResult(BaselinesById.Values.FirstOrDefault(b => b.ProjectId == projectId && b.IsActive));
 
+    /// <summary>Mirrors <c>BaselineRepository.ListByProjectAsync</c>'s contract: this project's
+    /// baselines as <see cref="BaselineListRow"/>s, newest capture first (then by time-ordered id).
+    /// Other projects' rows are excluded here just as the real query's <c>ProjectId</c> filter (and
+    /// the tenant filter) exclude them, so a handler test can assert both the projection and the
+    /// scoping. <c>ActivityCount</c> reads the seeded baseline's own count (populated at
+    /// <c>Capture</c>), matching the real query's SQL <c>Snapshots.Count</c>.</summary>
+    public Task<IReadOnlyList<BaselineListRow>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<BaselineListRow>>(
+            BaselinesById.Values
+                .Where(b => b.ProjectId == projectId)
+                .OrderByDescending(b => b.CapturedAt)
+                .ThenByDescending(b => b.Id)
+                .Select(b => new BaselineListRow(
+                    b.Id, b.ProjectId, b.Name, b.IsActive, b.CapturedAt, b.CapturedByUserId, b.Bac, b.ActivityCount))
+                .ToList());
+
     /// <summary>S14-BE-01 fix fake: mirrors <c>BaselineRepository.TryActivateAsync</c>'s real
     /// two-separate-saves shape (mutate <paramref name="previousActive"/>, "save", THEN mutate
     /// <paramref name="target"/>, "save") rather than mutating both up front and saving once - a test

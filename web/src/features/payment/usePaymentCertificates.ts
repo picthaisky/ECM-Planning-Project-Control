@@ -6,8 +6,8 @@ export type PaymentCertificatesLoadState = 'loading' | 'ready' | 'error'
 export type PaymentCertificateReloadState = 'idle' | 'reloading' | 'error'
 
 /**
- * Loads the S9-FE-01 milestone list (`GET .../projects/{projectId}/payment-certificates` — see
- * `api.ts#listPaymentCertificates`'s remarks: not implemented on the real backend yet) and owns
+ * Loads the S9-FE-01 milestone list (`GET .../projects/{projectId}/payment-certificates` — a real,
+ * live endpoint) and owns
  * "which certificate is currently selected" for the certificate detail panel + `ApprovalChainBar`,
  * matching the prototype's "งวดงาน — คลิกเพื่อดู Certificate" click-to-select list
  * (`docs/ECM Planning Prototype.dc.html` line ~314).
@@ -15,10 +15,10 @@ export type PaymentCertificateReloadState = 'idle' | 'reloading' | 'error'
  * Deliberately the *single* place that mutates a `PaymentCertificateDto` in local state: every real
  * S9-BE-05 command (submit/approve/return-for-revision/reject/record-payment) already returns the
  * fresh DTO as its response body, so `applyUpdatedCertificate` patches both the selected certificate
- * and its row in `certificates` directly from that response — never a re-fetch of the (not yet real)
- * list/get endpoints for the interactive flow. `reloadSelected` is the one path that *does* call the
- * not-yet-real `getPaymentCertificate` (manual "โหลดใหม่", primarily useful after a `409
- * concurrent-transition`), and fails visibly rather than silently when that 404s today.
+ * and its row in `certificates` directly from that response — no re-fetch of the list/get endpoints
+ * needed for the interactive flow. `reloadSelected` is the one path that *does* call the live
+ * `getPaymentCertificate` (manual "โหลดใหม่", primarily useful after a `409 concurrent-transition`),
+ * and fails visibly rather than silently on an error.
  */
 export function usePaymentCertificates(projectId: string) {
   const [certificates, setCertificates] = useState<PaymentCertificateDto[]>([])

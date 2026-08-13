@@ -1,0 +1,117 @@
+# infra/staging/docker-compose.yml — S16-DO-01 (docs/10. Sprint 16A)
+#
+# Provider-agnostic staging: the production-equivalent topology (api + web + MSSQL + storage) fronted
+# by a TLS-terminating reverse proxy, on a single node (docker-compose or k3s). No AWS/Azure-specific
+# service appears here by design (ADR-0010) — this is exactly what a human can stand up for UAT
+# (US-16.1) before the Sprint-16B cloud decision gate.
+#
+# HOW THIS DIFFERS FROM infra/docker/docker-compose.yml (the local dev stack):
+#   1. It PULLS the exact api/web images CI built and pushed to GHCR (by SHA), never builds from
+#      source — so staging runs byte-for-byte what CI tested (S16-DO-01 DoD: "ขึ้นระบบจาก image tag
+#      เดียวกับที่ CI สร้าง"). Set IMAGE_REGISTRY + IMAGE_TAG in .env to the CI SHA.
+#   2. It adds a TLS reverse proxy (`proxy`, Caddy) — the DoD's "มี TLS" — which is also the single
+#      public origin: it routes /api/* to the api and everything else to the web SPA. Because web and
+#      api are then same-origin, no CORS is needed (closes sprint-16.md F-3 for this topology).
+#   3. api/web are NOT published to the host — only the proxy is. The app is reachable only over TLS.
+#
+# STORAGE: the running app uses the local-disk IFileStorage adapter (LocalDiskFileStorage), so staging
+# mounts a persistent named volume at the storage root. This is the ONE intentional deviation from the
+# eventual object-storage production shape — the S3/Blob adapter (M-4) lands after the 16B gate, at
+# which point the `minio`/FileStorage__* shape already shown in infra/docker/docker-compose.yml slots
+# in. Documented in docs/runbooks/staging.md.
+#
+# Usage:
+#   cp infra/staging/.env.staging.example infra/staging/.env
+#   # edit infra/staging/.env: IMAGE_TAG (the CI SHA), all secrets, STAGING_DOMAIN
+#   docker compose -f infra/staging/docker-compose.yml --env-file infra/staging/.env pull
+#   docker compose -f infra/staging/docker-compose.yml --env-file infra/staging/.env up -d
+#   # migrations are applied by the gated `migrate` job in .github/workflows/cd.yml, not here.
+
+services:
+  proxy:
+    image: caddy:2.8-alpine
+    depends_on:
+      - api
+      - web
+    ports:
+      - "80:80"     # Caddy redirects 80 -> 443
+      - "443:443"
+    environment:
+      STAGING_DOMAIN: "${STAGING_DOMAIN:-localhost}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data      # persists the internal CA / issued certs across restarts
+      - caddy-config:/config
+    restart: unless-stopped
+
+  api:
+    image: "${IMAGE_REGISTRY:?set IMAGE_REGISTRY in .env}/api:${IMAGE_TAG:?set IMAGE_TAG (the CI git SHA) in .env}"
+    environment:
+      ASPNETCORE_ENVIRONMENT: "Staging"   # NOT Development: enables HSTS + the strict fallback authz
+      ConnectionStrings__CmPlusDatabase: "Server=mssql,1433;Database=${MSSQL_APP_DB:-CMPlusDb};User Id=${MSSQL_APP_USER:-cmplus_app};Password=${MSSQL_APP_PASSWORD:?set MSSQL_APP_PASSWORD in .env};TrustServerCertificate=True"
+      # Local-disk storage adapter (see header) — persistent volume below.
+      Storage__LocalRootPath: "/var/cmplus/storage"
+      # JWT — signing key is a secret, never defaulted.
+      Jwt__SigningKey: "${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env}"
+      Jwt__Issuer: "${JWT_ISSUER:-CMPlus}"
+      Jwt__Audience: "${JWT_AUDIENCE:-CMPlusClients}"
+      # EPPlus: staging may run the non-commercial licence for functional testing; production must set
+      # Excel__CommercialLicenseKey (sprint-16.md / staging-deploy-checklist.md §1).
+      Excel__CommercialLicenseKey: "${EXCEL_COMMERCIAL_LICENSE_KEY:-}"
+      # sprint-16.md F-1: the api sits behind the `proxy` above, so the per-IP login rate limiter must
+      # read the real client IP from X-Forwarded-For — trusting ONLY the proxy network, never all
+      # proxies (a trust-all config lets clients spoof the header and defeat the limiter). The
+      # ForwardedHeaders wiring that consumes this is added to Program.cs in the F-1 code fix; the
+      # trusted network is the compose network's subnet.
+      ForwardedHeaders__KnownNetwork: "${PROXY_KNOWN_NETWORK:-}"
+    volumes:
+      - cmplus-storage:/var/cmplus/storage
+    depends_on:
+      mssql:
+        condition: service_healthy
+    restart: unless-stopped
+    # HEALTHCHECK (GET /health/live) is baked into api.Dockerfile.
+
+  web:
+    # VITE_BUILD_ID is baked into this image at CI build time; pulling the CI image preserves the
+    # Service-Worker cache-bust — do not rebuild here.
+    image: "${IMAGE_REGISTRY:?set IMAGE_REGISTRY in .env}/web:${IMAGE_TAG:?set IMAGE_TAG (the CI git SHA) in .env}"
+    depends_on:
+      - api
+    restart: unless-stopped
+    # HEALTHCHECK is baked into web.Dockerfile.
+
+  mssql:
+    build:
+      context: ../docker/mssql
+      dockerfile: Dockerfile
+    image: cmplus/mssql:staging
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "${MSSQL_PID:-Developer}"
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}"
+      MSSQL_APP_DB: "${MSSQL_APP_DB:-CMPlusDb}"
+      MSSQL_APP_USER: "${MSSQL_APP_USER:-cmplus_app}"
+      MSSQL_APP_PASSWORD: "${MSSQL_APP_PASSWORD:?set MSSQL_APP_PASSWORD in .env}"
+    ports:
+      # Admin-plane port carrying the sa/app password — loopback only, never the LAN.
+      - "127.0.0.1:${MSSQL_HOST_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -N -Q \"SELECT 1\" || exit 1"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  mssql-data:
+  cmplus-storage:
+  caddy-data:
+  caddy-config:

@@ -83,4 +83,9 @@ export interface DashboardResponseDto {
   /** e.g. `EarnedValueExceedsBudget`/`ActualCostIsNegative` (`EvmWarningCodes`) — a data-quality
    * signal, never blocking, but must not be silently dropped (mirrors `EvmResponseDto.warnings`). */
   warnings: string[]
+  /** Total actually paid out (SUM of Disbursement ledger entries), decimal-as-string — the "เบิกจ่ายสะสม" KPI. */
+  cumulativeDisbursement: string
+  /** Distinct calendar dates with a weather-caused work stoppage (Impact != NoImpact) over the
+   * correction-resolved in-force weather-log set — the "วันฝนตกสะสม" KPI. */
+  cumulativeWeatherStoppageDays: number
 }

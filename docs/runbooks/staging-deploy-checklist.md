@@ -57,7 +57,7 @@ never baked into the image or committed.
 | Setting | Env var | Why it is not in the image |
 | --- | --- | --- |
 | JWT signing key | `Jwt__SigningKey` | Secret; forging it forges any user's session. See `docs/security/secrets-policy.md`. Must be ≥ 32 bytes of real entropy, unique per environment. |
-| DB connection | `ConnectionStrings__CmPlusDb` (or platform equivalent) | Contains the DB credential; use a least-privilege app login, **not** `sa`. |
+| DB connection | `ConnectionStrings__CmPlusDatabase` (the key the app binds — `configuration.GetConnectionString("CmPlusDatabase")`) | Contains the DB credential; use a least-privilege app login, **not** `sa`. |
 | EPPlus licence | `Excel__CommercialLicenseKey` | EPPlus 8 defaults to Polyform **Noncommercial**. CM+ is a commercial product — Excel import/export must not run under the noncommercial licence in production. **Human/legal action required before prod** (staging may run noncommercial for functional testing). |
 
 Also confirm: `Jwt__Issuer`/`Jwt__Audience` match what the frontend expects, and the token

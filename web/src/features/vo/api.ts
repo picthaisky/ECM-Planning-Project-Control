@@ -151,18 +151,17 @@ export async function getVariationOrder(id: string): Promise<VariationOrderDto> 
  * for one VO (`GetApprovalActionHistoryQuery`, shared unchanged with Payment Certificate per that
  * query's own doc comment).
  *
- * **This 404s unconditionally on the real backend today**, even for a VO that genuinely exists and
- * belongs to the caller's tenant — verified from source, not assumed:
- * `GetApprovalActionHistoryQueryHandler.DocumentExistsAsync`'s `switch` only has a case arm for
- * `ApprovalDocumentType.PaymentCertificate` (querying `IPaymentCertificateRepository`); the
- * `VariationOrder` arm falls through to `_ => false`, and the handler's constructor never even
- * injects an `IVariationOrderRepository` to check against. The controller action and the DTO shape
- * are both real and already wired correctly — only that one `switch` arm was never added, despite
- * the query's own doc comment saying Sprint 10 would add it ("not a redesign"). Flagged to
- * `backend-developer` as a one-line fix (the same fix shape `PaymentCertificate` already has), not a
- * new design. `useVoApprovalActions.ts` degrades this exactly like `features/payment/
- * useApprovalActions.ts` degrades its own (differently-caused) 404 — an honest `'unavailable'`
- * state, never fabricated history.
+ * **This is a real, live endpoint** (`VariationOrdersController.GetApprovalActions`, gated to
+ * `VoReadRoles`). It returns the VO's history on 200 and a bare 404 for an unknown/cross-tenant id
+ * (`GetApprovalActionHistoryQueryHandler.DocumentExistsAsync`'s `VariationOrder` arm checks
+ * `IVariationOrderRepository.GetByIdAsync` — the arm Sprint 10 added; integration test
+ * `VariationOrdersControllerTests` asserts both the 200 and the 404 cases).
+ *
+ * (Historical note: between the Sprint-10 aggregate landing and that arm being wired, this endpoint
+ * 404'd unconditionally — a stale `_ => false` default indistinguishable from a real 404 — which is
+ * why `useVoApprovalActions.ts` still degrades any failure to an honest `'unavailable'` state rather
+ * than fabricating history. That degrade is retained as defensive, not because the endpoint is
+ * missing.)
  */
 export async function getVoApprovalActions(variationOrderId: string): Promise<ApprovalActionDto[]> {
   try {

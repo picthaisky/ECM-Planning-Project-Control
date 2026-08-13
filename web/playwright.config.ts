@@ -30,6 +30,9 @@ const E2E_BASE_URL = `http://localhost:${E2E_PORT}`
 
 export default defineConfig({
   testDir: './e2e',
+  // e2e/smoke.spec.ts (S16-QA-02) targets a DEPLOYED backend, not this config's local dev server —
+  // it runs only via playwright.smoke.config.ts (npm run test:e2e:smoke), never the default suite.
+  testIgnore: '**/smoke.spec.ts',
   fullyParallel: false, // the perf spec drives real wall-clock timing; parallel runs would contend for CPU and skew frame-rate numbers (docs/perf/baseline.md's own contended-CPU findings apply here too)
   forbidOnly: !!process.env.CI,
   retries: 0, // a perf/visual measurement that only "passes" after an automatic retry is not a real result — report the real number instead

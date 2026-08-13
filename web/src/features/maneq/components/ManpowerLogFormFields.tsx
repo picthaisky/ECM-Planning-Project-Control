@@ -1,12 +1,22 @@
 import { useId } from 'react'
 import { LABOUR_TYPE_LABELS, SHIFT_LABELS } from '../maneqLabels'
 import type { ManpowerLogFormValues } from '../maneqForm'
-import type { LabourType, Shift } from '../types'
+import type { ActivityOptionDto, LabourType, Shift, WbsNodeOptionDto, WeatherLogOptionDto, WorkCategoryDto } from '../types'
 
 export interface ManpowerLogFormFieldsProps {
   values: ManpowerLogFormValues
   onChange: (patch: Partial<ManpowerLogFormValues>) => void
   disabled?: boolean
+  /** The work-category catalogue for the dropdown. When empty (not loaded / endpoint unavailable),
+   * the field degrades to a raw-GUID text input so logging is never blocked. */
+  workCategories?: WorkCategoryDto[]
+  /** The project's WBS nodes for the (optional) WBS-node dropdown; same empty-list fallback. */
+  wbsNodes?: WbsNodeOptionDto[]
+  /** Activities under the currently-selected WBS node for the (optional) dependent activity
+   * dropdown; same empty-list fallback (empty when no node is selected). */
+  activities?: ActivityOptionDto[]
+  /** The project's weather logs for the (optional) related-weather-log dropdown; same fallback. */
+  weatherLogs?: WeatherLogOptionDto[]
 }
 
 const inputClass =
@@ -21,13 +31,13 @@ const LABOUR_TYPES = Object.keys(LABOUR_TYPE_LABELS) as LabourType[]
  * §4.1/§4.7 rule 6: a correction replaces every field). Every field name/shape mirrors
  * `RecordManpowerLogRequest` exactly (`backend/src/CMPlus.WebApi/Controllers/Manpower/ManpowerLogRequests.cs`).
  *
- * `workCategoryId`/`wbsNodeId`/`activityId`/`relatedWeatherLogId` are plain GUID text inputs, not
- * dropdowns — the Sprint 12 backend exposes no catalogue/list endpoint for any of them (no
- * `GET /work-categories`, no `GET /manpower-logs` list — confirmed against
- * `ProjectManpowerLogsController.cs`), the identical situation `features/weather/components/
- * ActivityIdChips.tsx` already documents and solves the same way for `AffectedActivityIds`.
+ * Every entity-reference field is a real dropdown when its source is available — `workCategoryId`
+ * (`workCategories`, the catalogue), `wbsNodeId` (`wbsNodes`, the flattened WBS tree), `activityId`
+ * (`activities`, the selected node's activities), and `relatedWeatherLogId` (`weatherLogs`) — each
+ * degrading to a raw-GUID text input when empty/unavailable so logging is never blocked (the
+ * graceful-degrade answer `features/weather/components/ActivityIdChips.tsx` established).
  */
-export function ManpowerLogFormFields({ values, onChange, disabled }: ManpowerLogFormFieldsProps) {
+export function ManpowerLogFormFields({ values, onChange, disabled, workCategories = [], wbsNodes = [], activities = [], weatherLogs = [] }: ManpowerLogFormFieldsProps) {
   const logDateId = useId()
   const shiftId = useId()
   const workCategoryId = useId()
@@ -84,47 +94,98 @@ export function ManpowerLogFormFields({ values, onChange, disabled }: ManpowerLo
 
       <div>
         <label htmlFor={workCategoryId} className="block text-[11px] text-text-faint">
-          หมวดงาน (Work Category ID) — บังคับ
+          หมวดงาน (Work Category) — บังคับ
         </label>
-        <input
-          id={workCategoryId}
-          type="text"
-          disabled={disabled}
-          placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
-          value={values.workCategoryId}
-          onChange={(e) => onChange({ workCategoryId: e.target.value })}
-          className={guidInputClass}
-        />
+        {workCategories.length > 0 ? (
+          <select
+            id={workCategoryId}
+            disabled={disabled}
+            value={values.workCategoryId}
+            onChange={(e) => onChange({ workCategoryId: e.target.value })}
+            className={inputClass}
+          >
+            <option value="">— เลือกหมวดงาน —</option>
+            {workCategories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.nameTh} ({category.code})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={workCategoryId}
+            type="text"
+            disabled={disabled}
+            placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            value={values.workCategoryId}
+            onChange={(e) => onChange({ workCategoryId: e.target.value })}
+            className={guidInputClass}
+          />
+        )}
       </div>
 
       <div>
         <label htmlFor={wbsNodeId} className="block text-[11px] text-text-faint">
           WBS Node — ไม่บังคับ
         </label>
-        <input
-          id={wbsNodeId}
-          type="text"
-          disabled={disabled}
-          placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
-          value={values.wbsNodeId}
-          onChange={(e) => onChange({ wbsNodeId: e.target.value })}
-          className={guidInputClass}
-        />
+        {wbsNodes.length > 0 ? (
+          <select
+            id={wbsNodeId}
+            disabled={disabled}
+            value={values.wbsNodeId}
+            onChange={(e) => onChange({ wbsNodeId: e.target.value })}
+            className={inputClass}
+          >
+            <option value="">— ไม่ระบุ —</option>
+            {wbsNodes.map((node) => (
+              <option key={node.id} value={node.id}>
+                {node.code} — {node.title}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={wbsNodeId}
+            type="text"
+            disabled={disabled}
+            placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            value={values.wbsNodeId}
+            onChange={(e) => onChange({ wbsNodeId: e.target.value })}
+            className={guidInputClass}
+          />
+        )}
       </div>
 
       <div>
         <label htmlFor={activityId} className="block text-[11px] text-text-faint">
-          กิจกรรม (Activity ID) — ไม่บังคับ
+          กิจกรรม (Activity) — ไม่บังคับ
         </label>
-        <input
-          id={activityId}
-          type="text"
-          disabled={disabled}
-          placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
-          value={values.activityId}
-          onChange={(e) => onChange({ activityId: e.target.value })}
-          className={guidInputClass}
-        />
+        {activities.length > 0 ? (
+          <select
+            id={activityId}
+            disabled={disabled}
+            value={values.activityId}
+            onChange={(e) => onChange({ activityId: e.target.value })}
+            className={inputClass}
+          >
+            <option value="">— ไม่ระบุ —</option>
+            {activities.map((activity) => (
+              <option key={activity.id} value={activity.id}>
+                {activity.activityCode} — {activity.name}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={activityId}
+            type="text"
+            disabled={disabled}
+            placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            value={values.activityId}
+            onChange={(e) => onChange({ activityId: e.target.value })}
+            className={guidInputClass}
+          />
+        )}
       </div>
 
       <div>
@@ -289,17 +350,34 @@ export function ManpowerLogFormFields({ values, onChange, disabled }: ManpowerLo
 
       <div className="col-span-2">
         <label htmlFor={relatedWeatherLogIdId} className="block text-[11px] text-text-faint">
-          บันทึกสภาพอากาศที่เกี่ยวข้อง (Related Weather Log ID) — ไม่บังคับ
+          บันทึกสภาพอากาศที่เกี่ยวข้อง (Related Weather Log) — ไม่บังคับ
         </label>
-        <input
-          id={relatedWeatherLogIdId}
-          type="text"
-          disabled={disabled}
-          placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
-          value={values.relatedWeatherLogId}
-          onChange={(e) => onChange({ relatedWeatherLogId: e.target.value })}
-          className={guidInputClass}
-        />
+        {weatherLogs.length > 0 ? (
+          <select
+            id={relatedWeatherLogIdId}
+            disabled={disabled}
+            value={values.relatedWeatherLogId}
+            onChange={(e) => onChange({ relatedWeatherLogId: e.target.value })}
+            className={inputClass}
+          >
+            <option value="">— ไม่ระบุ —</option>
+            {weatherLogs.map((log) => (
+              <option key={log.id} value={log.id}>
+                {log.logDate.slice(0, 10)} — {log.condition}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            id={relatedWeatherLogIdId}
+            type="text"
+            disabled={disabled}
+            placeholder="3fa85f64-5717-4562-b3fc-2c963f66afa6"
+            value={values.relatedWeatherLogId}
+            onChange={(e) => onChange({ relatedWeatherLogId: e.target.value })}
+            className={guidInputClass}
+          />
+        )}
       </div>
     </div>
   )

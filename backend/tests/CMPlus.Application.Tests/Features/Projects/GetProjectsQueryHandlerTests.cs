@@ -1,4 +1,5 @@
 using CMPlus.Application.Abstractions;
+using CMPlus.Application.Features.Projects.Queries.GetProject;
 using CMPlus.Application.Features.Projects.Queries.GetProjects;
 
 namespace CMPlus.Application.Tests.Features.Projects;
@@ -11,6 +12,9 @@ public class GetProjectsQueryHandlerTests
 
         public Task<IReadOnlyList<ProjectListItemDto>> GetAllAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(ProjectsToReturn);
+
+        public Task<ProjectDetailDto?> GetDetailByIdAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ProjectDetailDto?>(null);
     }
 
     [Fact]

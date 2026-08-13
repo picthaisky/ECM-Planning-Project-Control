@@ -65,6 +65,7 @@ public static class DevDataSeeder
             if (tenantWasCreated)
             {
                 await ApprovalPolicySeeder.SeedDefaultPoliciesAsync(dbContext, tenant.Id, tenantSeed.Project.ContractStart, cancellationToken);
+                await WorkCategorySeeder.SeedDefaultCategoriesAsync(dbContext, tenant.Id, cancellationToken);
             }
 
             foreach (var role in DevSeedData.AllRoles)

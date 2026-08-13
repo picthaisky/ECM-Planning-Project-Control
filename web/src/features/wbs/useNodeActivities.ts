@@ -5,10 +5,10 @@ import type { ActivityForProgress } from './types'
 export type NodeActivitiesState = 'idle' | 'loading' | 'ready' | 'error'
 
 /**
- * Loads the activities under a chosen WBS node for the "โหมดอัปเดตความคืบหน้า" grid. See
- * `api.ts`'s `getNodeActivities` remarks: this read endpoint does not exist on the real backend
- * yet, so `state` reaching `'error'` (a 404 today) is an expected, correctly-handled outcome, not
- * a bug in this hook — `ProgressUpdatePanel` still offers the manual add-row path either way.
+ * Loads the activities under a chosen WBS node for the "โหมดอัปเดตความคืบหน้า" grid from the live
+ * `getNodeActivities` endpoint (`api.ts`). `state` reaching `'error'` (e.g. a genuine network/404
+ * failure) is a correctly-handled outcome, not a bug in this hook — `ProgressUpdatePanel` still
+ * offers the manual add-row path either way.
  */
 export function useNodeActivities() {
   const [state, setState] = useState<NodeActivitiesState>('idle')

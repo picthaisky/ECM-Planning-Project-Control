@@ -300,6 +300,15 @@ the missing environment/decision and the part that does not, and do the part tha
 unit-testable branch, a doc that's wrong, a config gap, an audit finding — these are almost never
 truly gated even when the end-to-end feature is. Treat "I think we're done" as a prompt to re-scan at
 one finer grain, not as a conclusion.
+Recurrence (same session, larger scale): after those eight items I *again* declared everything
+remaining gated. Re-reading the actual phase plan (`docs/10.`) instead of my memory of it surfaced the
+**entire Sprint-16A backlog** as authorable without the missing environment: a pre-production security
+review (which closed L-06 + HSTS + F-1 + F-2 in code, all mutation/end-to-end verified), a grounded
+UAT plan, a promote pipeline (`cd.yml`), a backup/restore runbook, and a provider-agnostic staging
+compose + runbook — six deliverables. The specific failure was re-deriving scope from memory ("Sprint
+16 is deployment, therefore gated") instead of re-reading the source of truth, which explicitly splits
+16A (staging/UAT, provider-agnostic, authorable) from 16B (cloud gate, genuinely gated). **When you
+think a whole phase is gated, re-read the plan text before concluding it — not your paraphrase of it.**
 
 ## 2026-08-12 — Doc comments that cite a removed invariant are latent traps; re-verify them when an invariant tightens
 Context: `ApprovalRoutingModels.cs` documented the VO-escalation denominator as
@@ -341,3 +350,63 @@ turns a config error into a silent authority downgrade.
 Rule: A permissive/lenient fallback must be reachable **only** from a provably-empty input, never from
 "input existed but nothing selected". Distinguish "empty" from "non-empty-but-no-match" and fail closed
 on the latter for any authority/money/security control. See ADR-0008 approval engine and N-06.
+
+## 2026-08-12 — Phased/gated infra steps must fail loudly until wired, never silently pass
+Context: Sprint 16A's promote pipeline (`.github/workflows/cd.yml`) and staging compose are
+provider-agnostic on purpose (the AWS-vs-Azure gate is deferred to 16B, ADR-0010). The genuinely
+provider-specific pieces — the actual deploy command, the pre-migration backup destination — cannot be
+implemented until that decision, but the surrounding structure (manual approval gates, separate
+approved migration job, rollback plan) is real and shippable now.
+What happened: each not-yet-implementable step was written to `exit 1` with a pointer to the follow-up
+task (`::error::… not yet implemented — see S16-DO-05`) rather than as a no-op placeholder. The
+alternative — a step that echoes "TODO" and succeeds — produces a **green** pipeline run that has
+deployed nothing and taken no backup: the worst outcome, because it looks done. The same instinct drove
+the api's ForwardedHeaders default (F-1): unconfigured trusts *nothing* (degraded but safe), never
+trust-all (green but exploitable).
+Root cause: a placeholder that succeeds converts "not done yet" into a false "passed", and CI/deploy
+green is exactly the signal humans stop scrutinising.
+Rule: A deferred or unconfigured step in a pipeline/deploy/security path must **fail closed and loud**
+(non-zero exit, explicit error naming the follow-up) until it is really wired — never a silent success.
+Reserve green for "this actually did its job". Pair every fail-loud seam with the config/env var and
+the ticket that lights it up, so the failure is self-explaining.
+
+## 2026-08-12 — When code lands that a doc calls "not yet done", update that doc in the same change
+Context: The F-1 and F-2 fixes landed code that three docs (sprint-16.md, staging.md,
+`ProjectPhotosControllerHeaderTests`' remark) had described as future/absent ("a future global
+security-header middleware, tracked separately"; "the Program.cs wiring … is the F-1 code fix, tracked
+separately — until it lands, leave PROXY_KNOWN_NETWORK blank"). Left unedited, those docs would now
+actively mislead — the mirror image of the doc-drift trap two lessons up, but caused by *adding* a
+capability rather than removing one.
+What happened: each doc was updated in the same change that shipped the code (F-1: sprint-16.md finding
+flipped to FIXED + staging.md's "until it lands" note rewritten to "in place"; F-2 likewise). The
+review's own scorecard was kept truthful turn by turn instead of at the end.
+Root cause: docs that forward-reference not-yet-built work are correct only until that work exists;
+completing the work silently makes them wrong, and nothing in the build/test loop catches a doc that
+under-claims.
+Rule: "Fixed X" is not done until every doc that said "X is coming / X is absent" says "X is here".
+Grep the forward-references (the finding id, "tracked separately", "not yet", "future") when you close
+the item, and update them in the same change — the same discipline as fixing stale *removed*-invariant
+comments, applied to newly-*added* capabilities.
+
+## 2026-08-13 — A caller's "this endpoint doesn't exist yet" comment is a claim to verify against the backend, never trust
+Context: A finer-grain sweep for real work grepped the frontend for "endpoint does not exist on the
+real backend yet" / "404s unconditionally" markers, treating them as a gap list. Of the items found:
+one (single-project GET) was genuinely still missing and worth building; **three or more were false**
+— the VO approval-actions read, the payment list/get/history reads, the WBS node-activities read, and
+the dashboard's "no Weather feature exists" claim were all *live and tested*, their frontend comments
+simply never updated after the backend caught up a sprint or two later. Acting on the VO comment
+verbatim nearly led to re-implementing an endpoint that already existed and had passing integration
+tests.
+Root cause: this codebase's frontend is deliberately built ahead of its backend (a screen ships with
+a real loading/error UI against an endpoint that "does not exist yet", so it lights up the moment the
+endpoint lands). That is a good practice — but it *guarantees* a population of "does not exist yet"
+comments that are correct only until the endpoint lands, and nothing in the build/test loop flags one
+that has since gone stale. So the density of stale gap-comments is highest exactly where you go
+looking for gaps.
+Rule: **Endpoint existence is a property of the backend, not of the caller's comment about it.** When
+a frontend comment says a backend endpoint is missing, confirm it by grepping the actual controllers/
+handlers (and their tests) before either building it or "fixing" the comment — the same "re-read the
+source of truth, not your paraphrase of it" discipline as the gated/plan lessons above. The tell that
+it is stale: the impl often exists under a *different name* than the comment guessed (the WBS read was
+`WbsNodesController`/`IWbsNodeActivitiesReader`, not the `ActivitiesController`/`IActivityReader` the
+comment had grepped for and not found).

@@ -25,6 +25,8 @@ const baseDashboard: DashboardResponseDto = {
   eacNullReason: null,
   progressRollup: { progressPercentage: '54.20', weightWarnings: [], mixedScopeWbsNodeIds: [] },
   warnings: [],
+  cumulativeDisbursement: '0.00',
+  cumulativeWeatherStoppageDays: 0,
 }
 
 function renderRow(dashboard: DashboardResponseDto) {
@@ -89,11 +91,11 @@ describe('DashboardKpiRow (S8-FE-01)', () => {
     expect(screen.getByText(/โครงการยังไม่เริ่มดำเนินการ/)).toBeInTheDocument()
   })
 
-  it('scope honesty: the disbursement and rain-day tiles never show a fabricated number, always "—" plus an explicit unavailability reason', () => {
-    renderRow(baseDashboard)
+  it('the disbursement and rain-day tiles now render the real aggregated values from the backend', () => {
+    renderRow({ ...baseDashboard, cumulativeDisbursement: '125000000.00', cumulativeWeatherStoppageDays: 7 })
 
-    expect(screen.getByText(/รอ Payment Certificate \(Sprint 9\)/)).toBeInTheDocument()
-    expect(screen.getByText(/Weather Log ยังไม่เปิดใช้งาน/)).toBeInTheDocument()
+    expect(screen.getByText('125.00 MB')).toBeInTheDocument() // cumulative disbursement (SUM of Disbursement ledger)
+    expect(screen.getByText('7 วัน')).toBeInTheDocument() // distinct weather work-stoppage days
   })
 
   it('every tile is a real link to the screen it drills into (prototype onClick affordance)', () => {

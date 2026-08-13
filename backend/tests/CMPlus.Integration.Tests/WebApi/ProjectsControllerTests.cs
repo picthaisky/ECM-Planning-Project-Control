@@ -119,6 +119,69 @@ public class ProjectsControllerTests : IClassFixture<CustomWebApplicationFactory
     }
 
     // ------------------------------------------------------------------------------------
+    // GET /api/v1/projects/{id} — the single-project "view" read (US-4.3/4.4).
+    // ------------------------------------------------------------------------------------
+
+    private sealed record ProjectDetailResponse(Guid Id, string Code, string Name, string EacVariantDefault);
+
+    [Fact]
+    public async Task An_Unauthenticated_Request_To_Get_A_Project_Is_Rejected_With_401()
+    {
+        using var client = _factory.CreateClient();
+
+        var response = await client.GetAsync($"/api/v1/projects/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Getting_A_Project_By_Id_Returns_Its_Full_Detail_Including_The_Eac_Config()
+    {
+        using var client = _factory.CreateClient();
+        var pm = await LoginAsync(client, "pm@siam-construction.dev");
+        Authorize(client, pm.AccessToken);
+        var project = await GetSeededProjectAsync(pm.TenantId);
+
+        var response = await client.GetAsync($"/api/v1/projects/{project.Id}");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var detail = await response.Content.ReadFromJsonAsync<ProjectDetailResponse>();
+        Assert.NotNull(detail);
+        Assert.Equal(project.Id, detail!.Id);
+        Assert.Equal("RCT-B", detail.Code);
+        // The EAC config the list/PUT DTOs exclude is present on this read (its whole reason to exist).
+        Assert.False(string.IsNullOrWhiteSpace(detail.EacVariantDefault));
+    }
+
+    [Fact]
+    public async Task Getting_Another_Tenants_Project_By_Id_Returns_404_Never_Its_Data()
+    {
+        using var client = _factory.CreateClient();
+        var pm = await LoginAsync(client, "pm@siam-construction.dev");
+        Authorize(client, pm.AccessToken);
+        // A real, existing project id — but it belongs to the OTHER tenant. The global query filter
+        // must make it indistinguishable from "does not exist" (ADR-0002 IDOR discipline).
+        var otherTenantsProject = await GetSeededProjectAsync((await LoginAsync(client, "pm@bkk-infra.dev")).TenantId);
+        Authorize(client, pm.AccessToken); // re-authorize as the first tenant's PM
+
+        var response = await client.GetAsync($"/api/v1/projects/{otherTenantsProject.Id}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Getting_An_Unknown_Project_Id_Returns_404()
+    {
+        using var client = _factory.CreateClient();
+        var pm = await LoginAsync(client, "pm@siam-construction.dev");
+        Authorize(client, pm.AccessToken);
+
+        var response = await client.GetAsync($"/api/v1/projects/{Guid.NewGuid()}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    // ------------------------------------------------------------------------------------
     // Gap 3: PUT /api/v1/projects/{id} validation failures now map to a distinct
     // "validation-error" ProblemDetails type instead of the generic "bad-request" bucket
     // (S4-BE-06).

@@ -20,8 +20,9 @@ name: CD (promote)
 # APP rollback: because every deploy is keyed by an immutable image SHA, rolling back is just running
 #   this same workflow again with `image_sha` set to the last known-good SHA. No special path needed.
 # DATABASE rollback: EF migrations are forward-only in production. A bad migration is recovered by
-#   (a) restoring the pre-migration backup taken by the `migrate` job's guard step below (see
-#   docs/runbooks/backup-restore.md, S16-DO-03), or (b) shipping a compensating forward migration.
+#   (a) restoring the pre-migration backup taken by the `migrate` job's "Take pre-migration backup"
+#   step below (see docs/runbooks/backup-restore.md, S16-DO-03), or (b) shipping a compensating
+#   forward migration.
 #   Never hand-edit a deployed schema. This is why `migrate` is gated and runs before `deploy`: an
 #   unapproved or failed migration must stop the promotion before any new app code goes live.
 
@@ -120,6 +121,24 @@ jobs:
           if [ -z "${CONN:-}" ]; then echo "::error::secrets.DB_CONNECTION is not set for ${{ inputs.target }}"; exit 1; fi
           echo "Run artifacts/migrations/*.PREFLIGHT.sql against the target and require zero rows."
           echo "::warning::Wire the sqlcmd/preflight execution here once the target DB host is reachable from CI (S16-DO-01)."
+
+      # Take a full backup BEFORE applying any migration, so the "restore the pre-migration backup"
+      # rollback path in this file's header is real, not aspirational. The backup destination is
+      # environment-specific (a durable store outside the DB host — blob/S3/managed backup), so like
+      # the deploy step it fails loudly until S16-DO-01/05 wires the target rather than silently
+      # skipping the safety net. Full procedure + retention: docs/runbooks/backup-restore.md.
+      - name: Take pre-migration backup
+        env:
+          CONN: ${{ secrets.DB_CONNECTION }}
+          BACKUP_TARGET: ${{ vars.DB_BACKUP_TARGET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_TARGET:-}" ]; then
+            echo "::error::vars.DB_BACKUP_TARGET is unset — a production migration must not be applied without a fresh restorable backup (docs/runbooks/backup-restore.md). Blocking."
+            exit 1
+          fi
+          echo "Take BACKUP DATABASE to ${BACKUP_TARGET} and record it in the drill log (S16-DO-03)."
+          echo "::warning::Wire the sqlcmd BACKUP DATABASE execution here once the backup target is reachable from CI (S16-DO-01)."
 
       - name: Build migration bundle
         run: |

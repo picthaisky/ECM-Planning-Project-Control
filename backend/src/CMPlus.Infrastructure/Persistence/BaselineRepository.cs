@@ -79,6 +79,22 @@ public sealed class BaselineRepository(
     public Task<Baseline?> FindActiveAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         dbContext.Baselines.FirstOrDefaultAsync(b => b.ProjectId == projectId && b.IsActive, cancellationToken);
 
+    public async Task<IReadOnlyList<BaselineListRow>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        // Projected read - never materializes Snapshots. ActivityCount is `b.Snapshots.Count`, which
+        // EF translates to a correlated COUNT subquery (Baseline.ActivityCount is Ignore()'d - a
+        // passthrough over the in-memory collection - so a parent-only entity load would read 0).
+        // Newest capture first; the ThenBy on the time-ordered Guid v7 id keeps the order total and
+        // deterministic if two captures ever share a CapturedAt instant. Tenant-scoped by the global
+        // query filter (ADR-0002).
+        await dbContext.Baselines
+            .AsNoTracking()
+            .Where(b => b.ProjectId == projectId)
+            .OrderByDescending(b => b.CapturedAt)
+            .ThenByDescending(b => b.Id)
+            .Select(b => new BaselineListRow(
+                b.Id, b.ProjectId, b.Name, b.IsActive, b.CapturedAt, b.CapturedByUserId, b.Bac, b.Snapshots.Count))
+            .ToListAsync(cancellationToken);
+
     /// <summary>
     /// <b>S14-BE-01 defect fix - see <see cref="IBaselineRepository.TryActivateAsync"/>'s remarks for
     /// the full rationale/evidence.</b>

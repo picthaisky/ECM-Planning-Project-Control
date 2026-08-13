@@ -348,4 +348,113 @@ public class BaselinesControllerTests : IClassFixture<CustomWebApplicationFactor
         Assert.False(row.IsRemoved);
         Assert.Equal(0, row.StartVarianceDays); // schedule itself was not moved above
     }
+
+    // ------------------------------------------------------------------------------------
+    // List (US-14.1) — GET /projects/{id}/baselines
+    // ------------------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("site")]
+    [InlineData("planning")]
+    public async Task A_Role_Outside_The_Money_Audience_Is_Forbidden_From_Listing_Baselines(string roleEmailPrefix)
+    {
+        // The list carries each baseline's Bac, so it is gated exactly like Compare, not like
+        // Capture - Planning can capture but, because the list exposes BAC, cannot read it here.
+        using var client = _factory.CreateClient();
+        var user = await LoginAsync(client, $"{roleEmailPrefix}@siam-construction.dev");
+        Authorize(client, user.AccessToken);
+        var projectId = await GetSeededProjectIdAsync(user.TenantId);
+
+        var response = await client.GetAsync(BaselinesUrl(projectId));
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Listing_Returns_The_Projects_Baselines_Newest_First_With_Their_Activity_Counts()
+    {
+        using var client = _factory.CreateClient();
+        var (tenantId, emailDomain) = SeedIsolatedTenant(UserRole.PM, UserRole.QS);
+        var projectId = SeedIsolatedProject(tenantId, bac: 485_000_000.00m);
+        SeedActivity(tenantId, projectId, DateTimeOffset.Parse("2026-01-01T00:00:00+07:00"), 14, 1_000_000.00m);
+        SeedActivity(tenantId, projectId, DateTimeOffset.Parse("2026-01-15T00:00:00+07:00"), 10, 500_000.00m);
+        var pm = await LoginAsync(client, $"pm@{emailDomain}");
+        Authorize(client, pm.AccessToken);
+
+        // Two captures over the real stack; the second is newer.
+        var first = (await (await client.PostAsJsonAsync(BaselinesUrl(projectId), new { Name = "BL-0 (Original)" }))
+            .Content.ReadFromJsonAsync<BaselineResponse>())!;
+        var second = (await (await client.PostAsJsonAsync(BaselinesUrl(projectId), new { Name = "BL-1 (Revised)" }))
+            .Content.ReadFromJsonAsync<BaselineResponse>())!;
+        await client.PostAsync($"{BaselinesUrl(projectId)}/{first.Id}/activate", content: null);
+
+        // Read the list as QS (a money-audience role that cannot capture) - proves the read gate is
+        // wider than the write gate.
+        var qs = await LoginAsync(client, $"qs@{emailDomain}");
+        using var qsClient = _factory.CreateClient();
+        Authorize(qsClient, qs.AccessToken);
+
+        var response = await qsClient.GetAsync(BaselinesUrl(projectId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var list = await response.Content.ReadFromJsonAsync<List<BaselineResponse>>();
+        Assert.NotNull(list);
+        Assert.Collection(
+            list!,
+            newest =>
+            {
+                Assert.Equal(second.Id, newest.Id); // newest capture first
+                Assert.Equal("BL-1 (Revised)", newest.Name);
+                Assert.False(newest.IsActive);
+                // The bug-catcher: ActivityCount is Ignore()'d/computed, so a parent-only load would
+                // read 0 - the real query must project Snapshots.Count. Both baselines snapshotted the
+                // same 2 seeded activities.
+                Assert.Equal(2, newest.ActivityCount);
+                Assert.Equal(485_000_000.00m, newest.Bac);
+            },
+            oldest =>
+            {
+                Assert.Equal(first.Id, oldest.Id);
+                Assert.True(oldest.IsActive); // the one we activated
+                Assert.Equal(2, oldest.ActivityCount);
+            });
+    }
+
+    [Fact]
+    public async Task Listing_Does_Not_Include_Another_Projects_Baselines()
+    {
+        using var client = _factory.CreateClient();
+        var (tenantId, emailDomain) = SeedIsolatedTenant(UserRole.PM);
+        var projectAId = SeedIsolatedProject(tenantId);
+        var projectBId = SeedIsolatedProject(tenantId);
+        var pm = await LoginAsync(client, $"pm@{emailDomain}");
+        Authorize(client, pm.AccessToken);
+        var blForA = (await (await client.PostAsJsonAsync(BaselinesUrl(projectAId), new { Name = "BL for A" }))
+            .Content.ReadFromJsonAsync<BaselineResponse>())!;
+
+        var response = await client.GetAsync(BaselinesUrl(projectBId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var list = await response.Content.ReadFromJsonAsync<List<BaselineResponse>>();
+        Assert.NotNull(list);
+        Assert.DoesNotContain(list!, b => b.Id == blForA.Id);
+        Assert.Empty(list!); // project B has none of its own
+    }
+
+    [Fact]
+    public async Task Listing_A_Project_With_No_Baselines_Returns_An_Empty_200_Never_404s()
+    {
+        using var client = _factory.CreateClient();
+        var (tenantId, emailDomain) = SeedIsolatedTenant(UserRole.PM);
+        var projectId = SeedIsolatedProject(tenantId);
+        var pm = await LoginAsync(client, $"pm@{emailDomain}");
+        Authorize(client, pm.AccessToken);
+
+        var response = await client.GetAsync(BaselinesUrl(projectId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var list = await response.Content.ReadFromJsonAsync<List<BaselineResponse>>();
+        Assert.NotNull(list);
+        Assert.Empty(list!);
+    }
 }

@@ -119,7 +119,7 @@ describe('ManeqPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '+ บันทึกวันนี้' })).toBeInTheDocument())
     await userEvent.click(screen.getByRole('button', { name: '+ บันทึกวันนี้' }))
 
-    await userEvent.type(screen.getByLabelText(/Work Category ID/), sampleLog.workCategoryId)
+    await userEvent.type(screen.getByLabelText(/Work Category/), sampleLog.workCategoryId)
     await userEvent.clear(screen.getByLabelText('จำนวนคน (Worker Count)'))
     await userEvent.type(screen.getByLabelText('จำนวนคน (Worker Count)'), '25')
     await userEvent.clear(screen.getByLabelText('ชั่วโมงแรงงานรวม (Man-Hours)'))

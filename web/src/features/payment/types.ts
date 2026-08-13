@@ -35,9 +35,8 @@ export type PaymentCertificateStatus =
 
 /**
  * `PaymentCertificateDto` — the shared response shape for every S9-BE-05 workflow command
- * (submit/approve/return-for-revision/reject/record-payment) *and* the intended
- * `GET /api/v1/payment-certificates/{id}` read (see `api.ts#getPaymentCertificate`'s remarks on why
- * that endpoint does not exist on the real backend yet).
+ * (submit/approve/return-for-revision/reject/record-payment) *and* the live
+ * `GET /api/v1/payment-certificates/{id}` read (`api.ts#getPaymentCertificate`).
  *
  * Deliberately does **not** include `AllowSelfApproval` or `ApprovalSteps` (role/quorum per step) —
  * the real `PaymentCertificate` aggregate has both (`backend/src/CMPlus.Domain/Entities/
@@ -125,4 +124,22 @@ export interface RecordPaymentPayload {
   reference: string
   /** ISO 8601 instant (`DateTimeOffset`). */
   paidAt: string
+}
+
+/**
+ * `POST /api/v1/projects/{projectId}/payment-certificates` request body (S9-BE-05,
+ * `CreatePaymentCertificateRequest`). Decimals are sent as JSON numbers (the server binds them to
+ * `decimal`). `previousCumulativeApprovePct` is deliberately absent - the server auto-derives it from
+ * the project's prior `Certified`/`Paid` certificates for this same milestone, never a client input.
+ */
+export interface CreatePaymentCertificatePayload {
+  milestoneNo: number
+  description?: string | null
+  milestoneValue: number
+  /** Cumulative certified progress % this period (0-100); must be >= the server-derived previous. */
+  thisCumulativeApprovePct: number
+  claimPct?: number | null
+  actualProgressPct?: number | null
+  /** Only used when the project's advance-recovery method is Manual. */
+  manualAdvanceRecoveryAmount?: number | null
 }

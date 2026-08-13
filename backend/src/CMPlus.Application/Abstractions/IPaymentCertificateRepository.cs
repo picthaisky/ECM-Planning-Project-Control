@@ -20,6 +20,15 @@ public interface IPaymentCertificateRepository
     /// S9-SEC-01 must verify).</summary>
     Task<PaymentCertificate?> FindAsync(Guid paymentCertificateId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Stages a brand-new certificate (S9-BE-05 create). A pure insert of a never-before-seen
+    /// aggregate - persisted by the next <see cref="TrySaveChangesAsync"/>, with its one summarizing
+    /// <c>AuditLog</c> row written automatically by the audit interceptor (a single Added entity, not
+    /// the bulk case that needs suppression). The caller has already computed and set the certificate's
+    /// money fields (via <c>CertificateCalculator</c>/<c>SetPeriodClaim</c>) before calling this.
+    /// </summary>
+    Task AddAsync(PaymentCertificate certificate, CancellationToken cancellationToken = default);
+
     /// <summary>Stages the ledger rows a certificate reaching <c>Certified</c> posts
     /// (<see cref="PaymentCertificate.CreateCertificationLedgerEntries"/>, S9-BE-04) - persisted in
     /// the same <see cref="TrySaveChangesAsync"/> call as the certificate's own state change, so the

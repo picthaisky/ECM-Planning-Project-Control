@@ -26,4 +26,11 @@ public interface IProjectFinanceLedgerReader
     /// project level, by <c>Project.AdvanceAmountPaid</c> - and must never inflate "how much has been
     /// recovered so far".</summary>
     Task<decimal> GetAdvanceRecoveredAsync(Guid projectId, CancellationToken cancellationToken = default);
+
+    /// <summary>Cumulative disbursement = <c>SUM(Amount) WHERE EntryType = Disbursement</c> - the total
+    /// actually paid out to the contractor (each <c>RecordPayment</c> on a certified certificate posts
+    /// one Disbursement row). Distinct from <see cref="GetAdvanceRecoveredAsync"/>, which deliberately
+    /// excludes Disbursement; this read is the Executive Dashboard's cumulative-disbursement KPI, not a
+    /// retention/advance balance.</summary>
+    Task<decimal> GetTotalDisbursedAsync(Guid projectId, CancellationToken cancellationToken = default);
 }

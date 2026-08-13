@@ -1,0 +1,26 @@
+# infra/staging/Caddyfile — S16-DO-01 TLS reverse proxy for staging.
+#
+# Single public origin over HTTPS. Routes /api/* to the api container and everything else to the web
+# SPA, so web and api are same-origin (no CORS needed — sprint-16.md F-3). Caddy sets X-Forwarded-For
+# / X-Forwarded-Proto / X-Forwarded-Host on every proxied request; the api's ForwardedHeaders wiring
+# (F-1) trusts them because they arrive from this proxy on the compose network.
+#
+# TLS: `tls internal` issues a cert from Caddy's own local CA — right for a staging box with no public
+# DNS. For a staging host that DOES have a real public hostname + reachable ports 80/443, delete the
+# `tls internal` line and Caddy will obtain a real Let's Encrypt cert automatically for $STAGING_DOMAIN.
+
+{$STAGING_DOMAIN:localhost} {
+	tls internal
+
+	encode gzip
+
+	# API first — most specific wins.
+	handle /api/* {
+		reverse_proxy api:8080
+	}
+
+	# Everything else is the SPA.
+	handle {
+		reverse_proxy web:8080
+	}
+}

@@ -5,6 +5,7 @@ using CMPlus.Application.Features.Evm;
 using CMPlus.Application.Services.Evm;
 using CMPlus.Application.Services.Wbs;
 using CMPlus.Application.Wbs;
+using CMPlus.Domain.Entities;
 using CMPlus.Domain.Enums;
 
 namespace CMPlus.Application.Tests.Features.Dashboard;
@@ -59,6 +60,41 @@ public class GetDashboardQueryHandlerTests
             Task.FromResult(ActivitiesToReturn);
     }
 
+    private sealed class FakeFinanceLedgerReader : IProjectFinanceLedgerReader
+    {
+        public decimal DisbursedToReturn { get; set; }
+
+        public Task<decimal> GetRetentionHeldAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult(0m);
+
+        public Task<decimal> GetAdvanceRecoveredAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult(0m);
+
+        public Task<decimal> GetTotalDisbursedAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+            Task.FromResult(DisbursedToReturn);
+    }
+
+    private sealed class FakeWeatherLogRepository : IDailyWeatherLogRepository
+    {
+        public IReadOnlyList<DailyWeatherLog> LogsToReturn { get; set; } = [];
+
+        public Task<IReadOnlyList<DailyWeatherLog>> ListByProjectAsync(
+            Guid projectId, DateTimeOffset? from, DateTimeOffset? to, CancellationToken cancellationToken = default) =>
+            Task.FromResult(LogsToReturn);
+
+        public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task<DailyWeatherLog?> GetByIdAsync(Guid projectId, Guid logId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<bool> HasAnyCorrectionTargetingAsync(Guid projectId, Guid targetLogId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyList<Guid>> FindExistingActivityIdsAsync(
+            Guid projectId, IReadOnlyCollection<Guid> activityIds, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task AddAsync(DailyWeatherLog log, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
     private static ProjectEvmSettings SettingsForFixtureA(EacVariant variant = EacVariant.CpiBased) => new(
         ProjectDataDate: DateTimeOffset.Parse("2026-06-30T00:00:00+07:00"),
         EacVariantDefault: variant,
@@ -76,7 +112,8 @@ public class GetDashboardQueryHandlerTests
     ];
 
     private static (GetDashboardQueryHandler Handler, FakeWbsTreeReader TreeReader, FakeWbsProgressReader ProgressReader) CreateHandler(
-        ProjectEvmSettings settings, decimal actualCost, IReadOnlyList<EvmActivityProgressInput>? activityInputs = null)
+        ProjectEvmSettings settings, decimal actualCost, IReadOnlyList<EvmActivityProgressInput>? activityInputs = null,
+        decimal disbursed = 0m, IReadOnlyList<DailyWeatherLog>? weatherLogs = null)
     {
         var dataReader = new FakeEvmDataReader
         {
@@ -87,7 +124,11 @@ public class GetDashboardQueryHandlerTests
         var computationService = new EvmComputationService(dataReader, costReader);
         var treeReader = new FakeWbsTreeReader();
         var progressReader = new FakeWbsProgressReader();
-        return (new GetDashboardQueryHandler(computationService, treeReader, progressReader), treeReader, progressReader);
+        var handler = new GetDashboardQueryHandler(
+            computationService, treeReader, progressReader,
+            new FakeFinanceLedgerReader { DisbursedToReturn = disbursed },
+            new FakeWeatherLogRepository { LogsToReturn = weatherLogs ?? [] });
+        return (handler, treeReader, progressReader);
     }
 
     [Fact]
@@ -95,12 +136,48 @@ public class GetDashboardQueryHandlerTests
     {
         var dataReader = new FakeEvmDataReader { SettingsToReturn = null };
         var computationService = new EvmComputationService(dataReader, new FakeActualCostReader());
-        var handler = new GetDashboardQueryHandler(computationService, new FakeWbsTreeReader(), new FakeWbsProgressReader());
+        var handler = new GetDashboardQueryHandler(
+            computationService, new FakeWbsTreeReader(), new FakeWbsProgressReader(),
+            new FakeFinanceLedgerReader(), new FakeWeatherLogRepository());
 
         var result = await handler.Handle(new GetDashboardQuery(Guid.NewGuid(), null), CancellationToken.None);
 
         Assert.True(result.IsFailure);
         Assert.Equal(DashboardErrorCodes.ProjectNotFound, result.Error);
+    }
+
+    [Fact]
+    public async Task Handle_Reports_Cumulative_Disbursement_And_Distinct_Weather_Stoppage_Days()
+    {
+        var tenantId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var recordedAt = DateTimeOffset.Parse("2026-06-30T00:00:00+07:00");
+
+        DailyWeatherLog Log(string date, WeatherImpact impact) => DailyWeatherLog.CreateOriginal(
+            tenantId, projectId, DateTimeOffset.Parse($"{date}T00:00:00+07:00"),
+            WeatherCondition.HeavyRain, conditionNote: null, rainfallMm: 10m, impact, impactNote: null,
+            hoursLost: impact == WeatherImpact.NoImpact ? null : 4m, user, recordedAt, affectedActivityIds: []);
+
+        // Two distinct stoppage dates (06-01, 06-02); a second stoppage log on 06-02 must NOT
+        // double-count (Distinct by date); a NoImpact day (06-03) must not count at all.
+        var weatherLogs = new[]
+        {
+            Log("2026-06-01", WeatherImpact.FullStoppage),
+            Log("2026-06-02", WeatherImpact.PartialStoppage),
+            Log("2026-06-02", WeatherImpact.FullStoppage),  // same date - collapses
+            Log("2026-06-03", WeatherImpact.NoImpact),       // excluded
+        };
+
+        var (handler, _, _) = CreateHandler(
+            SettingsForFixtureA(), actualCost: 350_000.00m, activityInputs: FixtureAActivityInputs(DateTimeOffset.Parse("2026-06-30T00:00:00+07:00")),
+            disbursed: 12_500_000.00m, weatherLogs: weatherLogs);
+
+        var result = await handler.Handle(new GetDashboardQuery(projectId, null), CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(12_500_000.00m, result.Value.CumulativeDisbursement);
+        Assert.Equal(2, result.Value.CumulativeWeatherStoppageDays);
     }
 
     [Fact]

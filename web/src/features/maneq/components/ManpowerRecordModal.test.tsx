@@ -6,12 +6,12 @@ import { ManpowerRecordModal } from './ManpowerRecordModal'
 const VALID_GUID = '3fa85f64-5717-4562-b3fc-2c963f66afa6'
 
 function renderModal(onSubmit = vi.fn()) {
-  render(<ManpowerRecordModal isOpen onClose={vi.fn()} onSubmit={onSubmit} busy={false} errorMessage={null} />)
+  render(<ManpowerRecordModal isOpen projectId="p1" onClose={vi.fn()} onSubmit={onSubmit} busy={false} errorMessage={null} />)
   return { onSubmit }
 }
 
 async function fillMinimumValidForm() {
-  await userEvent.type(screen.getByLabelText(/Work Category ID/), VALID_GUID)
+  await userEvent.type(screen.getByLabelText(/Work Category/), VALID_GUID)
   await userEvent.clear(screen.getByLabelText('จำนวนคน (Worker Count)'))
   await userEvent.type(screen.getByLabelText('จำนวนคน (Worker Count)'), '25')
   await userEvent.clear(screen.getByLabelText('ชั่วโมงแรงงานรวม (Man-Hours)'))
@@ -58,6 +58,7 @@ describe('ManpowerRecordModal', () => {
     render(
       <ManpowerRecordModal
         isOpen
+        projectId="p1"
         onClose={vi.fn()}
         onSubmit={vi.fn()}
         busy={false}

@@ -1,3 +1,4 @@
+using CMPlus.Application.Features.Projects.Queries.GetProject;
 using CMPlus.Application.Features.Projects.Queries.GetProjects;
 
 namespace CMPlus.Application.Abstractions;
@@ -6,10 +7,9 @@ namespace CMPlus.Application.Abstractions;
 /// Read-only projection boundary for <see cref="CMPlus.Domain.Entities.Project"/> (S4-BE-04).
 /// Deliberately separate from <see cref="IProjectRepository"/> - that interface is scoped to
 /// editing one tracked <c>Project</c> instance (see its own remarks); this one only ever returns
-/// lean, untracked rows. Named generically (not e.g. <c>IProjectListReader</c>) to leave room for
-/// a future <c>GetByIdAsync</c> (the single-project-read gap frontend-developer separately flagged
-/// as fast-follow work, `features/info/api.ts`'s <c>getProject</c>) without a rename - out of this
-/// gap-closure's scope, but the natural next addition to this same seam.
+/// lean, untracked rows. Named generically (not e.g. <c>IProjectListReader</c>) precisely so the
+/// single-project read (<see cref="GetDetailByIdAsync"/>, which closed the <c>features/info/api.ts</c>
+/// <c>getProject</c> gap) could be added here without a rename.
 /// </summary>
 public interface IProjectReader
 {
@@ -17,4 +17,11 @@ public interface IProjectReader
     /// EF query filter (ADR-0002) - no explicit TenantId parameter exists here, mirroring
     /// <see cref="IWbsTreeReader"/>/<see cref="IImportRepository"/>'s convention.</summary>
     Task<IReadOnlyList<ProjectListItemDto>> GetAllAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>One project's full detail (the editable field set plus the ADR-0007(d) EAC config),
+    /// or <see langword="null"/> if no project with this id exists in the caller's tenant - the global
+    /// EF query filter (ADR-0002) makes "wrong tenant" and "does not exist" indistinguishable. The
+    /// single-project read this interface's remarks anticipated (<c>features/info/api.ts#getProject</c>).
+    /// </summary>
+    Task<ProjectDetailDto?> GetDetailByIdAsync(Guid projectId, CancellationToken cancellationToken = default);
 }

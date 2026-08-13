@@ -15,6 +15,11 @@ public static class PaymentApprovalErrorCodes
     /// verify.</summary>
     public const string NotFound = "PaymentCertificateNotFound";
 
+    /// <summary>The <see cref="CMPlus.Domain.Entities.Project"/> a certificate is being created against
+    /// does not exist in the caller's tenant (or at all) - same IDOR-safe indistinguishability as
+    /// <see cref="NotFound"/>, mirroring <c>VariationOrderErrorCodes.ProjectNotFound</c>. Maps to 404.</summary>
+    public const string ProjectNotFound = "PaymentCertificateProjectNotFound";
+
     /// <summary>The certificate's current <c>Status</c> does not allow the requested transition
     /// (e.g. <c>Approve</c> on a certificate that is not <c>PendingApproval</c>). Maps to
     /// <c>409 document-immutable</c> (design.md §2.3) - the document is not currently open to the

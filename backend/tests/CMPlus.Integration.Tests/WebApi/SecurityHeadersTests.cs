@@ -22,6 +22,7 @@ public class SecurityHeadersTests : IClassFixture<CustomWebApplicationFactory>
     [InlineData("X-Frame-Options", "DENY")]
     [InlineData("Referrer-Policy", "no-referrer")]
     [InlineData("Cross-Origin-Resource-Policy", "same-origin")]
+    [InlineData("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")]
     public async Task Every_Response_Carries_The_Baseline_Security_Header(string name, string expected)
     {
         using var client = _factory.CreateClient();

@@ -28,6 +28,14 @@ public sealed class ManpowerEquipmentLogRepository(CmPlusDbContext dbContext) : 
             .ToListAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<WorkCategory>> ListWorkCategoriesForProjectAsync(
+        Guid projectId, CancellationToken cancellationToken = default) =>
+        await dbContext.WorkCategories.AsNoTracking()
+            .Where(w => w.IsActive && (w.ProjectId == null || w.ProjectId == projectId))
+            .OrderBy(w => w.DisplayOrder)
+            .ThenBy(w => w.Code)
+            .ToListAsync(cancellationToken);
+
     public async Task<IReadOnlyList<Guid>> FindExistingWbsNodeIdsAsync(
         Guid projectId, IReadOnlyCollection<Guid> wbsNodeIds, CancellationToken cancellationToken = default)
     {

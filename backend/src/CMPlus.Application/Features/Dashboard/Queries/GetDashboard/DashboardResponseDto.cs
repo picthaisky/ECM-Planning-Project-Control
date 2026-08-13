@@ -58,13 +58,20 @@ public sealed record DashboardResponseDto(
     bool EacComputable,
     EacNullReason? EacNullReason,
     DashboardProgressRollupDto ProgressRollup,
-    IReadOnlyList<string> Warnings)
+    IReadOnlyList<string> Warnings,
+    /// <summary>Total actually paid out (SUM of Disbursement ledger entries) - the "จ่ายสะสม" KPI.</summary>
+    decimal CumulativeDisbursement,
+    /// <summary>Distinct calendar dates with a weather-caused work stoppage (Impact != NoImpact),
+    /// over the correction-resolved in-force weather-log set - the "วันฝนสะสม" KPI.</summary>
+    int CumulativeWeatherStoppageDays)
 {
     public static DashboardResponseDto From(
         Guid projectId,
         EvmComputation computation,
         EacVariantResult selectedVariantResult,
-        WbsRollupResult rollup) => new(
+        WbsRollupResult rollup,
+        decimal cumulativeDisbursement,
+        int cumulativeWeatherStoppageDays) => new(
         projectId,
         computation.DataDate,
         RoundingRules.ToMoney(computation.Core.Bac),
@@ -84,5 +91,7 @@ public sealed record DashboardResponseDto(
         selectedVariantResult.Computable,
         selectedVariantResult.Reason,
         DashboardProgressRollupDto.From(rollup),
-        computation.EacResult.Warnings);
+        computation.EacResult.Warnings,
+        RoundingRules.ToMoney(cumulativeDisbursement),
+        cumulativeWeatherStoppageDays);
 }

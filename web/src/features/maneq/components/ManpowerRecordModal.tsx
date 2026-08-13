@@ -1,15 +1,20 @@
 import { useId, useState } from 'react'
 import { Button, Modal } from '../../../components'
 import { buildRecordManpowerLogPayload, emptyManpowerLogFormValues, validateManpowerLogFormValues } from '../maneqForm'
+import { useNodeActivities } from '../useNodeActivities'
 import { ManpowerLogFormFields } from './ManpowerLogFormFields'
-import type { RecordManpowerLogPayload } from '../types'
+import type { RecordManpowerLogPayload, WbsNodeOptionDto, WeatherLogOptionDto, WorkCategoryDto } from '../types'
 
 export interface ManpowerRecordModalProps {
   isOpen: boolean
+  projectId: string
   onClose: () => void
   onSubmit: (payload: RecordManpowerLogPayload) => void
   busy: boolean
   errorMessage: string | null
+  workCategories?: WorkCategoryDto[]
+  wbsNodes?: WbsNodeOptionDto[]
+  weatherLogs?: WeatherLogOptionDto[]
 }
 
 /**
@@ -28,8 +33,9 @@ export interface ManpowerRecordModalProps {
  * plain checkbox (default unticked) rather than a silent auto-retry — a genuine second crew on the
  * same key is real and should be recorded, but only when the user actually confirms it.
  */
-export function ManpowerRecordModal({ isOpen, onClose, onSubmit, busy, errorMessage }: ManpowerRecordModalProps) {
+export function ManpowerRecordModal({ isOpen, projectId, onClose, onSubmit, busy, errorMessage, workCategories, wbsNodes, weatherLogs }: ManpowerRecordModalProps) {
   const [values, setValues] = useState(emptyManpowerLogFormValues)
+  const activities = useNodeActivities(projectId, values.wbsNodeId)
   const [allowDuplicate, setAllowDuplicate] = useState(false)
   const [validationError, setValidationError] = useState<string | null>(null)
   const allowDuplicateId = useId()
@@ -72,7 +78,7 @@ export function ManpowerRecordModal({ isOpen, onClose, onSubmit, busy, errorMess
       </p>
 
       <div className="mt-3">
-        <ManpowerLogFormFields values={values} onChange={(patch) => setValues((prev) => ({ ...prev, ...patch }))} />
+        <ManpowerLogFormFields values={values} onChange={(patch) => setValues((prev) => ({ ...prev, ...patch }))} workCategories={workCategories} wbsNodes={wbsNodes} activities={activities} weatherLogs={weatherLogs} />
       </div>
 
       <label htmlFor={allowDuplicateId} className="mt-3 flex items-start gap-2 text-[11px] text-text-muted">

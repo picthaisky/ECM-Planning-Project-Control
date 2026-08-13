@@ -37,6 +37,11 @@ public sealed class SecurityHeadersMiddleware(RequestDelegate next)
             headers["X-Frame-Options"] = "DENY";
             headers["Referrer-Policy"] = "no-referrer";
             headers["Cross-Origin-Resource-Policy"] = "same-origin";
+            // sprint-16.md F-2: this API serves only JSON (the SPA is served by the separate `web`
+            // nginx container, never this origin), so the tightest possible policy is both safe and
+            // correct — a response that is ever rendered directly in a browser can load nothing and
+            // frame nothing. If first-party HTML is ever served here, this must be relaxed for it.
+            headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'";
             return Task.CompletedTask;
         }, context);
 

@@ -62,28 +62,28 @@ the login brute-force protection.
 
 ## OPEN findings — deployment-topology dependent (owner: S16-DO-01/02, re-check on running staging)
 
-### F-1 (HIGH) — `UseForwardedHeaders` is absent; behind the LB the per-IP rate limiter sees the proxy IP
+### F-1 (HIGH) — per-IP rate limiter behind the proxy → **CODE FIXED + mutation-verified; one config step remains**
 - **Impact:** The staging/production topology (§16A: `api + web + MSSQL + object storage`, TLS) puts
   a reverse proxy / load balancer in front of the API. The M-1 login limiter partitions its per-IP
   window on `HttpContext.Connection.RemoteIpAddress`, which behind a proxy is the **proxy's** address
-  — so every client shares one bucket and the per-IP brute-force protection is effectively defeated
-  (either everyone is throttled together, or the limit never bites per attacker). `UseHttpsRedirection`
-  and scheme detection can also misjudge the original scheme.
-- **Fix (must be correct, not just present):** add `UseForwardedHeaders` (processing
-  `X-Forwarded-For` + `X-Forwarded-Proto`) **before** `UseHttpsRedirection` and the rate limiter —
-  **but restrict it to the known proxy** via `KnownProxies`/`KnownNetworks` set to the real LB
-  address/subnet. A trust-all configuration is *worse than the gap*: any client could spoof
-  `X-Forwarded-For` and trivially evade the limiter. Because the correct value is the deploy's proxy
-  address, this is wired in `infra/staging` config, not hard-coded now.
-- **Gate:** re-test on running staging — repeated failed logins from one client must 429 that client
-  without 429-ing others. **Blocks production.**
+  — so every client shares one bucket and the per-IP brute-force protection is effectively defeated.
+- **Fixed:** `app.UseForwardedHeaders()` is now the first pipeline step (before `UseHttpsRedirection`
+  and the rate limiter), configured by `ForwardedHeadersSetup.Configure` to honour `X-Forwarded-For`/
+  `-Proto` **only** from the network in `ForwardedHeaders:KnownNetwork`. It clears the framework's
+  default trusted networks and never trusts by bare proxy IP; a **trust-all is structurally
+  impossible** (there is no code path that adds `0.0.0.0/0`), and an unset value trusts **nothing**
+  (degraded-but-not-spoofable). Proven by `ForwardedHeadersSetupTests` (6 cases) and mutation-checked:
+  removing the `Clear()` makes the "trusts nothing" cases fail.
+- **Remaining (config, not code):** set `PROXY_KNOWN_NETWORK` in `infra/staging/.env` to the compose
+  network subnet (discovery command in `docs/runbooks/staging.md` §5). **Gate:** re-test on running
+  staging — repeated failed logins from one client must 429 that client without 429-ing others.
+  Code no longer blocks production; the staging config + re-test does.
 
-### F-2 (MEDIUM) — No `Content-Security-Policy`
-- Add `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` for this JSON API. Not
-  set in `SecurityHeadersMiddleware` now because the exact policy depends on whether anything HTML is
-  ever served on this origin (the dev-only OpenAPI document, any future first-party page); for a pure
-  JSON API on its own origin the strict policy above is safe and should be added once the topology is
-  confirmed. `X-Frame-Options: DENY` already covers framing in the interim.
+### F-2 (MEDIUM) — No `Content-Security-Policy` → **FIXED**
+- Topology confirmed: this API serves only JSON, and the SPA is served by the separate `web` nginx
+  container (never this origin), so the tightest policy is safe. `SecurityHeadersMiddleware` now sets
+  `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'` on every response, asserted
+  end-to-end by `SecurityHeadersTests`. Must be relaxed only if first-party HTML is ever served here.
 
 ### F-3 (MEDIUM) — No CORS policy configured
 - If the web app is served **same-origin** (a reverse proxy fronts both `api` and `web`), no CORS is

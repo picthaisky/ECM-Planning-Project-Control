@@ -10,6 +10,9 @@ import { ManpowerLogTable } from './components/ManpowerLogTable'
 import { ManpowerRecordModal } from './components/ManpowerRecordModal'
 import { useManpowerLogActions } from './useManpowerLogActions'
 import { useManpowerOverview } from './useManpowerOverview'
+import { useWorkCategories } from './useWorkCategories'
+import { useWbsNodes } from './useWbsNodes'
+import { useWeatherLogs } from './useWeatherLogs'
 import type { ManpowerLogDto } from './types'
 
 /** Mirrors `ProjectManpowerLogsController.WriteRoles` exactly (PM/Planning/Site/QS/Admin) — the same
@@ -22,17 +25,15 @@ const MANPOWER_WRITE_ROLES: readonly UserRole[] = ['PM', 'Planning', 'Site', 'QS
  * screen shows is either read verbatim from `GetProductivityIndexQueryHandler`'s response or a
  * client-side display transform (rounding/colour banding) that never changes what the number means.
  *
- * **Scope note, stated plainly rather than silently worked around.** The Sprint 12 backend exposes
- * exactly three endpoints for this feature (`POST .../manpower-logs`,
- * `POST .../manpower-logs/{id}/corrections`, `GET .../manpower-logs/productivity-index` — confirmed
- * directly against `ProjectManpowerLogsController.cs`, not assumed): there is no `GET` list of raw
- * log rows and no work-category catalogue endpoint. Consequences, each documented at its own call
- * site rather than papered over:
- * - The daily log table (`ManpowerLogTable.tsx`) shows only rows recorded in *this browser session*
- *   (`recordedRows` below), not a full historical register.
- * - `workCategoryId`/`wbsNodeId`/`activityId`/`relatedWeatherLogId` are plain GUID text inputs, not
- *   dropdowns (`ManpowerLogFormFields.tsx`) — the same already-established answer
- *   `features/weather/components/ActivityIdChips.tsx` gives for the identical gap.
+ * **Scope note.** There is still no `GET` list of raw manpower-log rows (a deliberate scope decision),
+ * so the daily log table (`ManpowerLogTable.tsx`) shows only rows recorded in *this browser session*
+ * (`recordedRows` below), not a full historical register. Every entity-reference field, however, is
+ * now a real dropdown, so nobody ever types a GUID:
+ * - `workCategoryId` (catalogue, `useWorkCategories`), `wbsNodeId` (WBS tree, `useWbsNodes`),
+ *   `activityId` (a dependent dropdown of the selected node's activities, `useNodeActivities` inside
+ *   the modals), and `relatedWeatherLogId` (`useWeatherLogs`). Each degrades to a raw-GUID text input
+ *   when its source is empty/unavailable, so logging is never blocked — the graceful-degrade answer
+ *   `features/weather/components/ActivityIdChips.tsx` established for the identical case.
  * - The equipment KPI tile renders "—" (`ManpowerKpiTiles.tsx`) rather than a fabricated utilisation
  *   figure.
  * - The histogram's bar colour uses real per-day manning (headcount) variance, not a manufactured
@@ -47,6 +48,9 @@ export function ManeqPage() {
   const currentUserRole = useAuthStore((state) => state.claims?.role ?? null)
 
   const overview = useManpowerOverview(projectId ?? '')
+  const workCategories = useWorkCategories(projectId ?? '')
+  const wbsNodes = useWbsNodes(projectId ?? '')
+  const weatherLogs = useWeatherLogs(projectId ?? '')
   const [recordedRows, setRecordedRows] = useState<ManpowerLogDto[]>([])
   const actions = useManpowerLogActions(projectId ?? '', () => void overview.reload())
 
@@ -102,12 +106,16 @@ export function ManeqPage() {
 
       <ManpowerRecordModal
         isOpen={recordModalOpen}
+        projectId={projectId}
         onClose={() => {
           actions.clearActionError()
           setRecordModalOpen(false)
         }}
         busy={actions.busyAction === 'record'}
         errorMessage={actions.actionError}
+        workCategories={workCategories}
+        wbsNodes={wbsNodes}
+        weatherLogs={weatherLogs}
         onSubmit={(payload) => {
           void actions.record(payload).then((saved) => {
             if (saved) {
@@ -121,6 +129,7 @@ export function ManeqPage() {
       {correctionTarget && (
         <ManpowerCorrectionModal
           isOpen
+          projectId={projectId}
           target={correctionTarget}
           onClose={() => {
             actions.clearActionError()
@@ -128,6 +137,9 @@ export function ManeqPage() {
           }}
           busy={actions.busyAction === 'correct'}
           errorMessage={actions.actionError}
+          workCategories={workCategories}
+          wbsNodes={wbsNodes}
+          weatherLogs={weatherLogs}
           onSubmit={(logId, payload) => {
             void actions.correct(logId, payload).then((saved) => {
               if (saved) {

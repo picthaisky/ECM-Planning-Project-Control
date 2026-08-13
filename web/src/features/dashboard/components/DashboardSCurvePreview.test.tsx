@@ -27,6 +27,8 @@ const baseDashboard: DashboardResponseDto = {
   eacNullReason: null,
   progressRollup: { progressPercentage: '54.20', weightWarnings: [], mixedScopeWbsNodeIds: [] },
   warnings: [],
+  cumulativeDisbursement: '0.00',
+  cumulativeWeatherStoppageDays: 0,
 }
 
 function renderPreview(overrides: Partial<ComponentProps<typeof DashboardSCurvePreview>> = {}) {

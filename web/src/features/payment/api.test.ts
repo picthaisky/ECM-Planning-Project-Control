@@ -3,6 +3,7 @@ import type { InternalAxiosRequestConfig } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   approvePaymentCertificate,
+  createPaymentCertificate,
   getApprovalActions,
   getPaymentCertificate,
   listPaymentCertificates,
@@ -124,6 +125,40 @@ describe('features/payment/api', () => {
 
       expect(apiClient.get).toHaveBeenCalledWith('/payment-certificates/cert-1/approval-actions')
       expect(result).toEqual(history)
+    })
+  })
+
+  describe('createPaymentCertificate', () => {
+    it('posts the project-scoped create body and returns the computed certificate', async () => {
+      vi.mocked(apiClient.post).mockResolvedValueOnce({ data: sampleCertificate })
+
+      const result = await createPaymentCertificate('project-1', {
+        milestoneNo: 3,
+        description: 'งานโครงสร้างชั้น 3-5',
+        milestoneValue: 21_600_000,
+        thisCumulativeApprovePct: 100,
+      })
+
+      expect(apiClient.post).toHaveBeenCalledWith('/projects/project-1/payment-certificates', {
+        milestoneNo: 3,
+        description: 'งานโครงสร้างชั้น 3-5',
+        milestoneValue: 21_600_000,
+        thisCumulativeApprovePct: 100,
+      })
+      expect(result).toEqual(sampleCertificate)
+    })
+
+    it('translates a 422 retention-not-configured into a Thai PaymentApiError', async () => {
+      vi.mocked(apiClient.post).mockRejectedValueOnce(
+        makeError(422, {
+          type: 'https://cmplus.dev/problems/payment-retention-rate-not-configured',
+          detail: 'PaymentRetentionRateNotConfigured',
+        }),
+      )
+
+      await expect(
+        createPaymentCertificate('project-1', { milestoneNo: 1, milestoneValue: 1, thisCumulativeApprovePct: 10 }),
+      ).rejects.toMatchObject({ name: 'PaymentApiError', status: 422 })
     })
   })
 

@@ -28,11 +28,10 @@ export interface WbsTreeDto {
 /**
  * One activity available for progress entry under a given WBS node.
  *
- * There is no real backend endpoint for this yet — see `api.ts`'s `getNodeActivities` remarks —
- * the natural complement `GET
- * /api/v1/projects/{projectId}/wbs-nodes/{wbsNodeId}/activities` this type models does not exist
- * on the live API. `currentProgressPercentage` is what `useBatchProgressForm.ts` compares a new
- * entry against to decide whether the "ยืนยันการปรับลดความคืบหน้า" confirmation is required.
+ * Loaded from the live `GET /api/v1/projects/{projectId}/wbs-nodes/{wbsNodeId}/activities` endpoint
+ * (`api.ts`'s `getNodeActivities`; `WbsNodesController`/`GetNodeActivitiesQuery`).
+ * `currentProgressPercentage` is what `useBatchProgressForm.ts` compares a new entry against to
+ * decide whether the "ยืนยันการปรับลดความคืบหน้า" confirmation is required.
  */
 export interface ActivityForProgress {
   id: string

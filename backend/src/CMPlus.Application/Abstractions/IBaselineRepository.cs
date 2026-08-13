@@ -9,6 +9,18 @@ public sealed record BaselineActivitySourceRow(
     Guid ActivityId, DateTimeOffset PlannedStart, DateTimeOffset PlannedFinish, int DurationDays, decimal BudgetCost);
 
 /// <summary>
+/// One row of the baseline LIST read (<see cref="IBaselineRepository.ListByProjectAsync"/>) - the
+/// summary columns the Baseline screen's list needs. <see cref="ActivityCount"/> is computed in SQL as
+/// <c>Snapshots.Count</c> (a correlated COUNT, no row materialization): <see cref="Baseline.ActivityCount"/>
+/// is <c>Ignore()</c>'d - a passthrough over the in-memory <c>Snapshots</c> collection - so a
+/// parent-only entity load would read 0, and the list must not pay to materialize every baseline's
+/// (potentially 10,000-row) snapshots just to count them.
+/// </summary>
+public sealed record BaselineListRow(
+    Guid Id, Guid ProjectId, string Name, bool IsActive, DateTimeOffset CapturedAt,
+    Guid CapturedByUserId, decimal Bac, int ActivityCount);
+
+/// <summary>
 /// Persistence boundary for S14-BE-01's <c>CaptureBaselineCommand</c>/<c>ActivateBaselineCommand</c>.
 /// </summary>
 public interface IBaselineRepository
@@ -58,6 +70,17 @@ public interface IBaselineRepository
     /// <see cref="Baseline"/>'s own remarks on how that invariant is (and is not yet) enforced.
     /// </summary>
     Task<Baseline?> FindActiveAsync(Guid projectId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Every baseline captured for <paramref name="projectId"/> as a <see cref="BaselineListRow"/>,
+    /// newest capture first - a projected read (<c>AsNoTracking</c>), never loading the potentially-
+    /// 10,000-row <see cref="Baseline.Snapshots"/>; the row's <c>ActivityCount</c> is a SQL
+    /// <c>Snapshots.Count</c>, see <see cref="BaselineListRow"/>. Tenant-scoped by the global query
+    /// filter (ADR-0002), so an unknown or cross-tenant <paramref name="projectId"/> yields an empty
+    /// list, never a leak - the same list-read shape <c>IVariationOrderRepository.ListByProjectAsync</c>
+    /// establishes.
+    /// </summary>
+    Task<IReadOnlyList<BaselineListRow>> ListByProjectAsync(Guid projectId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// <b>S14-BE-01 defect fix (docs/perf/s14-baseline-storage.md §2).</b> Activates

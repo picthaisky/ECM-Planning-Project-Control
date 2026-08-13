@@ -1,6 +1,7 @@
 using CMPlus.Application.Features.Projects.Commands.SetEacAdvancedInputs;
 using CMPlus.Application.Features.Projects.Commands.SetEacVariantDefault;
 using CMPlus.Application.Features.Projects.Commands.UpdateProject;
+using CMPlus.Application.Features.Projects.Queries.GetProject;
 using CMPlus.Application.Features.Projects.Queries.GetProjects;
 using CMPlus.Domain.Enums;
 using CMPlus.WebApi.ErrorHandling;
@@ -46,6 +47,19 @@ public sealed class ProjectsController(ISender sender) : ControllerBase
     {
         var projects = await sender.Send(new GetProjectsQuery(), cancellationToken);
         return Ok(projects);
+    }
+
+    /// <summary>`GET /api/v1/projects/{projectId}` (US-4.3/4.4) - the Project Info screen's "view"
+    /// half: full project detail incl. the EAC config. Class-level `[Authorize]` only (any
+    /// authenticated tenant user can view their own tenant's project), the same audience as
+    /// <see cref="GetAll"/>; a cross-tenant/unknown id is a bare 404.</summary>
+    [HttpGet("{projectId:guid}")]
+    public async Task<IActionResult> GetById(Guid projectId, CancellationToken cancellationToken)
+    {
+        var result = await sender.Send(new GetProjectQuery(projectId), cancellationToken);
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : ResultProblemMapper.ToActionResult(result.Error, HttpContext.Request.Path);
     }
 
     [HttpPut("{projectId:guid}")]

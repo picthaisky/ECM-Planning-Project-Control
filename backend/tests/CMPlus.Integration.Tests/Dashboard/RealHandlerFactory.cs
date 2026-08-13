@@ -47,7 +47,8 @@ internal static class RealHandlerFactory
     {
         using var dbContext = factory.CreateContext();
         var handler = new GetDashboardQueryHandler(
-            CreateEvmComputationService(dbContext), new WbsTreeReader(dbContext), new WbsProgressReader(dbContext));
+            CreateEvmComputationService(dbContext), new WbsTreeReader(dbContext), new WbsProgressReader(dbContext),
+            new ProjectFinanceLedgerReader(dbContext), new DailyWeatherLogRepository(dbContext));
         return await handler.Handle(query, CancellationToken.None);
     }
 

@@ -1,3 +1,4 @@
+using CMPlus.Application.Features.Payment.Commands.CreatePaymentCertificate;
 using CMPlus.Application.Features.Payment.Queries.ListPaymentCertificates;
 using CMPlus.WebApi.ErrorHandling;
 using MediatR;
@@ -34,5 +35,32 @@ public sealed class ProjectPaymentCertificatesController(ISender sender) : Contr
     {
         var result = await sender.Send(new ListPaymentCertificatesQuery(projectId), cancellationToken);
         return result.IsSuccess ? Ok(result.Value) : ResultProblemMapper.ToActionResult(result.Error, HttpContext.Request.Path);
+    }
+
+    /// <summary>
+    /// `POST /api/v1/projects/{projectId}/payment-certificates` (S9-BE-05 create) - creates one
+    /// period's IPC in Draft with its money fields already computed (immediately submittable). Gated
+    /// by the class-level CertificateCrudRoles (QS/PM/ProjectDirector/Admin) - certifying a period's
+    /// value is the QS's core action, the same audience that reads/manages certificates.
+    /// </summary>
+    [HttpPost]
+    public async Task<IActionResult> Create(
+        Guid projectId, [FromBody] CreatePaymentCertificateRequest request, CancellationToken cancellationToken)
+    {
+        var result = await sender.Send(
+            new CreatePaymentCertificateCommand(
+                projectId,
+                request.MilestoneNo,
+                request.Description,
+                request.MilestoneValue,
+                request.ThisCumulativeApprovePct,
+                request.ClaimPct,
+                request.ActualProgressPct,
+                request.ManualAdvanceRecoveryAmount),
+            cancellationToken);
+
+        return result.IsSuccess
+            ? Created($"/api/v1/payment-certificates/{result.Value.Id}", result.Value)
+            : ResultProblemMapper.ToActionResult(result.Error, HttpContext.Request.Path);
     }
 }

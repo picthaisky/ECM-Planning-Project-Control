@@ -83,11 +83,9 @@ export function VoPage() {
   }, [vos.loadState, vos.variationOrders, vos.selected?.id])
 
   // Prefer the REAL vote count (`voteProgress.ts`, derived from the append-only history) over the
-  // generic before/after-diff notice the moment history is actually available — today that is
-  // realistically never (`api.ts#getVoApprovalActions`'s remarks: the read 404s unconditionally
-  // until a one-line backend gap is fixed), so this degrades to the hook's own generic message, but
-  // it is wired up now rather than left dead, exactly like `ApprovalChainBar`'s own history section
-  // already does for the identical reason.
+  // generic before/after-diff notice once history is available — which it is, from the live
+  // `getVoApprovalActions` endpoint; this falls back to the hook's generic message only when history
+  // is genuinely unavailable, exactly like `ApprovalChainBar`'s own history section.
   const quorumProgress = useMemo(() => {
     if (!actions.quorumPendingNotice || !vos.selected || !actions.quorumPendingAction) return null
     return computeStepVoteProgress(

@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using CMPlus.Domain.Entities;
+using CMPlus.Domain.Enums;
+using CMPlus.Infrastructure.Auth;
 using CMPlus.Infrastructure.Persistence.Seed;
 using CMPlus.WebApi.Json;
 using Microsoft.AspNetCore.Mvc;
@@ -295,5 +297,112 @@ public class PaymentCertificateReadsControllerTests : IClassFixture<CustomWebApp
         Assert.Equal(qs.UserId, history[1].ActorUserId);
         Assert.Equal("QS", history[1].ActorRoleAtTime);
         Assert.True(history[1].ActedAt >= history[0].ActedAt); // oldest-first
+    }
+
+    // ------------------------------------------------------------------------------------
+    // POST /projects/{projectId}/payment-certificates (S9-BE-05 create)
+    // ------------------------------------------------------------------------------------
+
+    private sealed record CreatedCertificateResponse(
+        Guid Id, Guid ProjectId, int MilestoneNo, decimal PreviousCumulativeApprovePct, decimal ApprovePct,
+        decimal GrossCertifiedAmount, decimal RetentionAmount, decimal NetPayment, string Status);
+
+    /// <summary>Isolated tenant + one user per requested role - so a create test never adds a second
+    /// project to the shared dev tenant (which would break other tests' <c>GetSeededProjectIdAsync</c>
+    /// <c>SingleAsync</c>). Mirrors <c>BaselinesControllerTests.SeedIsolatedTenant</c>.</summary>
+    private (Guid TenantId, string EmailDomain) SeedIsolatedTenant(params UserRole[] roles)
+    {
+        var emailDomain = $"ipc-create-fixture-{Guid.NewGuid():N}.dev";
+        var tenant = new Tenant($"IPC Create Fixture {Guid.NewGuid():N}");
+
+        using var context = _factory.CreateDbContextForSeeding(tenant.Id);
+        context.Tenants.Add(tenant);
+
+        var passwordHash = new Pbkdf2PasswordHasher().Hash(DevDataSeeder.DevSeedPassword);
+        foreach (var role in roles)
+        {
+            context.Users.Add(new User(tenant.Id, $"{role.ToString().ToLowerInvariant()}@{emailDomain}", role, passwordHash));
+        }
+
+        context.SaveChanges();
+        return (tenant.Id, emailDomain);
+    }
+
+    /// <summary>A fresh project in the given (isolated) tenant with a known clean money config (5%
+    /// retention uncapped, 0% advance so Net = Gross - Retention).</summary>
+    private Guid SeedConfiguredProject(Guid tenantId, decimal? retentionRate = 5.00m)
+    {
+        using var context = _factory.CreateDbContextForSeeding(tenantId);
+        var project = Project.Create(
+            tenantId, "Create-IPC Fixture", $"IPC-{Guid.NewGuid():N}", "Owner",
+            DateTimeOffset.UtcNow.AddYears(-1), DateTimeOffset.UtcNow.AddYears(1),
+            bac: 100_000_000.00m, DateTimeOffset.UtcNow,
+            retentionRate: retentionRate, advanceRate: 0.00m, contractValue: 100_000_000.00m);
+        context.Projects.Add(project);
+        context.SaveChanges();
+        return project.Id;
+    }
+
+    [Fact]
+    public async Task Creating_A_Certificate_Computes_Its_Money_Returns_201_And_It_Appears_In_The_List()
+    {
+        using var client = _factory.CreateClient();
+        var (tenantId, emailDomain) = SeedIsolatedTenant(UserRole.QS);
+        var projectId = SeedConfiguredProject(tenantId);
+        var qs = await LoginAsync(client, $"qs@{emailDomain}");
+        Authorize(client, qs.AccessToken);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/projects/{projectId}/payment-certificates",
+            new { MilestoneNo = 1, Description = "IPC 1", MilestoneValue = 20_000_000.00m, ThisCumulativeApprovePct = 30.00m });
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var created = await response.Content.ReadFromJsonAsync<CreatedCertificateResponse>(ResponseJsonOptions);
+        Assert.NotNull(created);
+        Assert.Equal("Draft", created!.Status);
+        Assert.Equal(0m, created.PreviousCumulativeApprovePct);
+        Assert.Equal(6_000_000.00m, created.GrossCertifiedAmount);   // 20M * 30%
+        Assert.Equal(300_000.00m, created.RetentionAmount);          // 5% * 6M
+        Assert.Equal(5_700_000.00m, created.NetPayment);
+
+        // Round-trips through the real DB: the list read now shows it.
+        var list = await client.GetFromJsonAsync<List<CreatedCertificateResponse>>(
+            $"/api/v1/projects/{projectId}/payment-certificates", ResponseJsonOptions);
+        Assert.NotNull(list);
+        Assert.Contains(list!, c => c.Id == created.Id && c.GrossCertifiedAmount == 6_000_000.00m);
+    }
+
+    [Fact]
+    public async Task A_Role_Outside_The_Certificate_Crud_Audience_Cannot_Create()
+    {
+        using var client = _factory.CreateClient();
+        var (tenantId, emailDomain) = SeedIsolatedTenant(UserRole.Site);
+        var projectId = SeedConfiguredProject(tenantId);
+        var site = await LoginAsync(client, $"site@{emailDomain}");
+        Authorize(client, site.AccessToken);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/projects/{projectId}/payment-certificates",
+            new { MilestoneNo = 1, MilestoneValue = 20_000_000.00m, ThisCumulativeApprovePct = 30.00m });
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Creating_Against_A_Project_With_No_Retention_Rate_Fails_Closed_With_422()
+    {
+        using var client = _factory.CreateClient();
+        var (tenantId, emailDomain) = SeedIsolatedTenant(UserRole.QS);
+        var projectId = SeedConfiguredProject(tenantId, retentionRate: null);
+        var qs = await LoginAsync(client, $"qs@{emailDomain}");
+        Authorize(client, qs.AccessToken);
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/v1/projects/{projectId}/payment-certificates",
+            new { MilestoneNo = 1, MilestoneValue = 20_000_000.00m, ThisCumulativeApprovePct = 30.00m });
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, response.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>();
+        Assert.Equal("https://cmplus.dev/problems/payment-retention-rate-not-configured", problem!.Type);
     }
 }

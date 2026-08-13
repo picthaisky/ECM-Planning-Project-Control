@@ -159,28 +159,19 @@ function toProjectApiError(error: unknown, extraTitles?: Record<string, string>)
  * `GET /api/v1/projects/{projectId}` — the Project Info screen's "view" half (US-4.3/4.4), now
  * also the S14-FE-02 source for the project's current EAC configuration (`ProjectEacConfig`).
  *
- * This endpoint does **not exist on the real backend yet**: Sprint 4 shipped
- * `PUT /api/v1/projects/{projectId}` (`UpdateProjectCommand`, whose response body already *is*
- * the `ProjectDto` this call expects) but no companion read query/controller action. Calling this
- * against the live API returns a 404 today. It is still implemented and wired up front-end-side —
- * typed against `ProjectDetail` (`ProjectDto`'s field set plus the S14 EAC config), with a correct
- * loading/error/empty state in `ProjectMasterCard`/`EacAdvancedInputsCard` — because a
- * read-first-edit-second UX is the whole point of "view/edit" (the S4-FE-02 DoD), and the natural
- * backend fix is a trivial `GetProjectQuery` reusing `ProjectDto` verbatim, not a new design.
- * Flagged to `backend-developer`/`system-architect` as fast-follow work.
+ * **This is now a real, live endpoint** (`ProjectsController` `[HttpGet("{projectId}")]` →
+ * `GetProjectQuery` → `ProjectDetailDto`; class-level `[Authorize]`, so any authenticated tenant
+ * user can view their own tenant's project, and a cross-tenant/unknown id is a bare 404 — integration
+ * test `ProjectsControllerTests` covers the 200, the cross-tenant 404, and the unknown-id 404).
  *
- * **S14-FE-02 extends this same gap, does not add a new one.** The backend's own `ProjectDto`
- * *deliberately* excludes `eacVariantDefault`/`eacManualEtc`/`eacCustomPerformanceFactor` ("ADR-
- * 0007(c)'s own dedicated, separately-audited action from Sprint 7, not part of this command" —
- * that DTO's own doc comment) — correct for the `PUT` response, but it means there is genuinely no
- * endpoint anywhere that returns the *current* value of `EacManualEtc`/`EacCustomPerformanceFactor`
- * for a page reload (only `SetEacAdvancedInputsResultDto`/`SetEacVariantDefaultResultDto` do, and
- * only right after a write). `EacAdvancedInputsCard`'s full-representation `PUT
- * .../eac-advanced-inputs` needs to know the *current* value of the field the user is not editing
- * (see `setEacAdvancedInputs`'s remarks) — so once `GetProjectQuery` is built, its response DTO
- * must be a superset of `ProjectDto` carrying these three fields too, not just `ProjectDto` as
- * originally scoped. Do not delete this function, its `ProjectEacConfig` fields, or its call sites
- * to "fix" the 404 — the correct fix is building the endpoint to this exact shape.
+ * Its `ProjectDetailDto` is built as **exactly the superset this call needs**: `ProjectDto`'s full
+ * editable field set (the `PUT` response shape) **plus** `eacVariantDefault`/`eacManualEtc`/
+ * `eacCustomPerformanceFactor`/`eacManualEtcStaleSince`. The `PUT` response's `ProjectDto`
+ * deliberately excludes the EAC fields (ADR-0007(c)'s separately-audited Sprint-7 action), so before
+ * this endpoint existed there was no way to load the *current* EAC config on a page reload — this
+ * read closes that gap, which is why `ProjectDetail = Project & ProjectEacConfig` and why
+ * `EacAdvancedInputsCard`'s full-representation `PUT` can now know the current value of the field the
+ * user is not editing (see `setEacAdvancedInputs`'s remarks).
  */
 export async function getProject(projectId: string): Promise<ProjectDetail> {
   try {

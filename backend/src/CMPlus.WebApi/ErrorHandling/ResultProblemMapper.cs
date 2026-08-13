@@ -136,6 +136,21 @@ public static class ResultProblemMapper
             [PaymentApprovalErrorCodes.DuplicateChainVoter] = (StatusCodes.Status403Forbidden, "duplicate-chain-voter", "You have already voted (approved or rejected) on a different step of this document's current approval chain."),
             [PaymentApprovalErrorCodes.ConcurrencyConflict] = (StatusCodes.Status409Conflict, "concurrent-transition", "Another action has already changed this document. Reload and try again."),
 
+            // S9-BE-05 create (CreatePaymentCertificateCommand): a certificate raised against a
+            // nonexistent/cross-tenant project.
+            [PaymentApprovalErrorCodes.ProjectNotFound] = (StatusCodes.Status404NotFound, "not-found", "The requested resource was not found."),
+
+            // CertificateCalculator (S9-BE-02/03) error codes - their HTTP mapping was deliberately
+            // deferred (PaymentModels.cs remark) to "whichever task builds the create certificate
+            // handler". All 422: the request is well-formed but the project's money config is missing
+            // or the certified progress is not monotonic, so the certificate cannot be computed. The
+            // "configure this in Project Info" user copy the S9-BE-02 DoD calls for is the frontend's
+            // job, keyed off these stable type slugs.
+            [CMPlus.Application.Services.Payment.PaymentErrorCodes.RetentionRateNotConfigured] = (StatusCodes.Status422UnprocessableEntity, "payment-retention-rate-not-configured", "This project has no retention rate configured. Set it in Project Info before creating a payment certificate."),
+            [CMPlus.Application.Services.Payment.PaymentErrorCodes.AdvanceRateNotConfigured] = (StatusCodes.Status422UnprocessableEntity, "payment-advance-rate-not-configured", "This project has no advance rate configured. Set it in Project Info before creating a payment certificate."),
+            [CMPlus.Application.Services.Payment.PaymentErrorCodes.ApprovePctNotMonotonic] = (StatusCodes.Status422UnprocessableEntity, "payment-approve-pct-not-monotonic", "Certified cumulative progress cannot be less than a previously certified period for this milestone."),
+            [CMPlus.Application.Services.Payment.PaymentErrorCodes.AdvanceRecoveryThresholdBandsNotConfigured] = (StatusCodes.Status422UnprocessableEntity, "payment-advance-recovery-bands-not-configured", "This project uses threshold-banded advance recovery but its start/rate bands are not configured. Set them in Project Info."),
+
             // Security review sprint-09.md M-03: a corrupt/legacy chain snapshot degrades to a clear
             // 409 instead of an unhandled 500.
             [PaymentApprovalErrorCodes.CorruptApprovalChain] = (StatusCodes.Status409Conflict, "corrupt-approval-chain", "This document's approval chain could not be resolved. Contact support."),

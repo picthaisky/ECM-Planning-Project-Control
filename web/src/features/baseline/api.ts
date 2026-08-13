@@ -73,25 +73,19 @@ const COMPARE_FORBIDDEN_MESSAGE = 'คุณไม่มีสิทธิ์ด
  * `GET /api/v1/projects/{projectId}/baselines` — the Baseline screen's "list every captured
  * baseline" need (S14-FE-01 DoD: "จัดการหลายชุด").
  *
- * **This endpoint does not exist on the real backend yet.** `BaselinesController` (real source,
- * read directly — `backend/src/CMPlus.WebApi/Controllers/Baselines/BaselinesController.cs`) wires
- * exactly three actions: `POST` (capture), `POST .../activate`, `GET .../compare`. No `[HttpGet]`
- * with no sub-route exists, and no `ListBaselinesQuery` exists in
- * `CMPlus.Application/Features/Baseline/`. It was not assigned to any Sprint 14 backend row — the
- * capture command already returns the new baseline's full `BaselineDto`, so the backend itself
- * never needed a list read — but the *screen* genuinely does (a QS returning to this page after
- * the session that captured a baseline has ended has no way to see what exists).
+ * **This endpoint now exists on the real backend** (`BaselinesController.List` → `ListBaselinesQuery`,
+ * the fast-follow this comment originally flagged — a `[HttpGet]` with no sub-route returning
+ * `BaselineDto[]`, newest capture first). It is gated to the **money-audience** (PM/QS/ProjectDirector/
+ * Executive/Admin — the same gate as `compare`, because each `BaselineDto` carries the baseline's
+ * `Bac`), deliberately **not** the wider capture audience, so **Planning receives 403 here** even
+ * though it can capture/activate.
  *
- * Calling this against the live API returns a 404 today. It is still implemented and wired up
- * front-end-side, typed against the natural `BaselineDto[]` shape (`BaselineDto.From`'s own field
- * list, unchanged) — same discipline as `features/info/api.ts#getProject`/
- * `features/payment/api.ts#listPaymentCertificates`'s identical situation. `useBaselines.ts`
- * degrades gracefully when this 404s: it falls back to a **session-local** list built from
- * `capture`/`activate` responses (clearly flagged in the UI, `BaselineListPanel.tsx`) rather than
- * blocking the whole screen — `compare` does not depend on this call at all (it defaults
- * server-side to the project's active baseline), so the comparison table stays fully live and
- * correct regardless. Flagged to `backend-developer`/`system-architect` as fast-follow work; the
- * natural fix is a trivial `ListBaselinesQuery` reusing `BaselineDto` verbatim.
+ * The **session-local fallback is retained by design** as the graceful-degrade path: `useBaselines.ts`
+ * silently falls back to a session-local list (built from `capture`/`activate` responses, flagged in
+ * `BaselineListPanel.tsx`) on ANY error from this call — now most relevantly a Planning user's 403,
+ * previously the 404 before the endpoint existed, or any transient failure. `compare` never depends on
+ * this call (it defaults server-side to the active baseline), so the comparison table is live
+ * regardless. Response shape is `BaselineDto[]` verbatim (`BaselineDto.From`'s field list, unchanged).
  */
 export async function listBaselines(projectId: string): Promise<BaselineDto[]> {
   try {

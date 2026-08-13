@@ -17,6 +17,7 @@ dist-ssr
 /test-results/
 /playwright-report/
 /playwright-report-sw/
+/playwright-report-smoke/
 /blob-report/
 /playwright/.cache/
 

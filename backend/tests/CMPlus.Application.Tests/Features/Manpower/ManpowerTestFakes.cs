@@ -23,9 +23,14 @@ internal sealed class FakeManpowerEquipmentLogRepository : IManpowerEquipmentLog
     public Task<bool> ProjectExistsAsync(Guid projectId, CancellationToken cancellationToken = default) =>
         Task.FromResult(ProjectExists);
 
+    public List<WorkCategory> WorkCategoriesToReturn { get; set; } = [];
+
     public Task<IReadOnlyList<Guid>> FindExistingWorkCategoryIdsAsync(
         Guid projectId, IReadOnlyCollection<Guid> workCategoryIds, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlyList<Guid>>(workCategoryIds.Where(ExistingWorkCategoryIds.Contains).ToList());
+
+    public Task<IReadOnlyList<WorkCategory>> ListWorkCategoriesForProjectAsync(Guid projectId, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyList<WorkCategory>>(WorkCategoriesToReturn);
 
     public Task<IReadOnlyList<Guid>> FindExistingWbsNodeIdsAsync(
         Guid projectId, IReadOnlyCollection<Guid> wbsNodeIds, CancellationToken cancellationToken = default) =>

@@ -4,6 +4,7 @@ import type { ProblemDetails } from '../auth/types'
 import type {
   ApprovalActionDto,
   ApprovalCommentPayload,
+  CreatePaymentCertificatePayload,
   PaymentCertificateDto,
   RecordPaymentPayload,
 } from './types'
@@ -81,23 +82,18 @@ function toPaymentApiError(error: unknown): PaymentApiError {
  * milestone list (prototype screen #7's left panel, `docs/ECM Planning Prototype.dc.html` line
  * ~314).
  *
- * **This endpoint does not exist on the real backend yet.** `grep "HttpGet" backend/src/CMPlus.WebApi/
- * Controllers/Payment/PaymentCertificatesController.cs` returns zero results — Sprint 9's backend
- * scope (S9-BE-01..06) built the aggregate, the calculator, the ledger and the five *transition*
- * endpoints (submit/approve/return-for-revision/reject/record-payment), but no create or read
- * surface (confirmed by the Sprint 9 security review, L-04: "there is no GET for a certificate at
- * all — nor any create endpoint (`grep "new PaymentCertificate(" in backend/src` returns zero
- * production hits)"). Calling this against the live API returns a 404 today, and — because there is
- * also no create endpoint — it would return an empty list even once implemented, until a
- * certificate-creation flow exists.
+ * **The read endpoint now exists** (`ProjectPaymentCertificatesController` → `ListPaymentCertificatesQuery`,
+ * the L-04 read-side gap closure). It never 404s: an unknown/cross-tenant project returns an empty
+ * list, tenant-scoped by the global query filter.
  *
- * Still implemented and wired up front-end-side, typed against the exact `PaymentCertificateDto`
- * shape every real S9-BE-05 command already returns, with a correct loading/empty/error state in
- * `PaymentPage`/`usePaymentCertificates` — same discipline as `features/info/api.ts#getProject`'s
- * identical situation (that function's own remarks). Flagged to `backend-developer`/
- * `system-architect` as fast-follow work; see this sprint's frontend report. Do not delete this
- * function or its call site to "fix" the 404 — the correct fix is adding the endpoints, not
- * removing the read.
+ * **A create endpoint now exists** (`POST /api/v1/projects/{projectId}/payment-certificates` →
+ * `CreatePaymentCertificateCommand`, S9-BE-05): the QS certifies a cumulative progress % against a
+ * milestone value and the server computes gross/retention/advance/net (project-configured rates) and
+ * auto-derives the per-milestone previous cumulative from the project's `Certified`/`Paid` priors.
+ * So the list populates once a certificate is created. The remaining frontend follow-up is the create
+ * *form* itself (a `createPaymentCertificate` call + UI); this list read is unchanged and correct.
+ * Typed against the exact `PaymentCertificateDto` every payment command returns, with correct
+ * loading/empty/error states in `PaymentPage`/`usePaymentCertificates`.
  */
 export async function listPaymentCertificates(projectId: string): Promise<PaymentCertificateDto[]> {
   try {
@@ -116,11 +112,11 @@ export async function listPaymentCertificates(projectId: string): Promise<Paymen
  * one of those five real commands already returns the fresh `PaymentCertificateDto` as its response
  * body, so the certificate shown after a mutation is always that response, not a re-fetch.
  *
- * **This endpoint does not exist on the real backend yet** — same gap as
- * `listPaymentCertificates` above (L-04). Kept for the same reason `features/info/api.ts#getProject`
- * is kept: it is the natural, obvious shape (every mutation already proves the response DTO is
- * correct) and a real `GetPaymentCertificateQuery` is a trivial fast-follow reusing
- * `PaymentCertificateDto.From` verbatim, not a new design.
+ * **This endpoint now exists** (`PaymentCertificatesController` `[HttpGet("{id:guid}")]` →
+ * `GetPaymentCertificateQuery`, the L-04 read-side gap closure; integration test
+ * `PaymentCertificateReadsControllerTests` covers the 200, the 404-for-unknown-id, and the
+ * cross-tenant-404 cases). Returns the certificate's `PaymentCertificateDto`, or a bare 404 for an
+ * unknown/cross-tenant id.
  */
 export async function getPaymentCertificate(id: string): Promise<PaymentCertificateDto> {
   try {
@@ -136,17 +132,39 @@ export async function getPaymentCertificate(id: string): Promise<PaymentCertific
  * ledger for one certificate (design.md §2.3), what `components/ApprovalChainBar.tsx` needs to show
  * "every step (role/approver/time/comment)" (S9-FE-02 DoD).
  *
- * **This endpoint does not exist on the real backend yet.** Same `grep` evidence as
- * `listPaymentCertificates`'s remarks; explicitly named by the Sprint 9 security review (L-04:
- * "Add the read endpoint (tenant-scoped, same 404 discipline) alongside S9-FE-01/02" — and §9.5(ii):
- * "S9-FE-02's chain bar will need this before the quorum feature is usable"). `ApprovalChainBar`
- * degrades gracefully when this 404s today (an honest "รายละเอียดยังไม่พร้อมใช้งาน" note, never a
- * fabricated history) — see that component's own remarks and `useApprovalActions.ts`.
+ * **This is a real, live endpoint** (`PaymentCertificatesController` `[HttpGet("{id}/approval-actions")]`
+ * → `GetApprovalActionHistoryQuery`, the L-04 read-side gap closure; integration test
+ * `PaymentCertificateReadsControllerTests` covers the 200 and the empty/404 cases). Returns the
+ * certificate's append-only history, or a bare 404 for an unknown/cross-tenant id. `ApprovalChainBar`
+ * still degrades any failure to an honest "รายละเอียดยังไม่พร้อมใช้งาน" note (never fabricated
+ * history) — retained as defensive, not because the endpoint is missing.
  */
 export async function getApprovalActions(paymentCertificateId: string): Promise<ApprovalActionDto[]> {
   try {
     const response = await apiClient.get<ApprovalActionDto[]>(
       `/payment-certificates/${paymentCertificateId}/approval-actions`,
+    )
+    return response.data
+  } catch (error) {
+    throw toPaymentApiError(error)
+  }
+}
+
+/**
+ * `POST /api/v1/projects/{projectId}/payment-certificates` (S9-BE-05) — real, live endpoint. Creates
+ * one period's IPC in `Draft` with its money already computed server-side and returns the full
+ * `PaymentCertificateDto` (immediately selectable/submittable). `QS,PM,ProjectDirector,Admin` only
+ * server-side (`ProjectPaymentCertificatesController`'s class-level `CertificateCrudRoles`); the UI
+ * hides the form for other roles, but the server is always the real authorization boundary.
+ */
+export async function createPaymentCertificate(
+  projectId: string,
+  payload: CreatePaymentCertificatePayload,
+): Promise<PaymentCertificateDto> {
+  try {
+    const response = await apiClient.post<PaymentCertificateDto>(
+      `/projects/${projectId}/payment-certificates`,
+      payload,
     )
     return response.data
   } catch (error) {

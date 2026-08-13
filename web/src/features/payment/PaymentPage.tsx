@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { Button } from '../../components'
 import { useAuthStore } from '../../store/authStore'
 import type { UserRole } from '../../store/authStore'
 import { canAttemptApprove, canAttemptReject, canAttemptReturnForRevision, resolveChainStepTone } from './chainPermissions'
 import { ApprovalChainBar } from './components/ApprovalChainBar'
 import { CertificatePanel } from './components/CertificatePanel'
+import { CreateCertificateModal } from './components/CreateCertificateModal'
 import { MilestoneCertificateTable } from './components/MilestoneCertificateTable'
 import { ProjectSettingsModal } from './components/ProjectSettingsModal'
 import { PAYMENT_STATUS_LABELS } from './paymentStatusLabels'
@@ -23,19 +25,17 @@ const SUBMIT_ROLES: readonly UserRole[] = ['QS', 'PM', 'ProjectDirector', 'Admin
  * #7) + the certificate detail panel with the fixed Gross → Retention → Advance recovery → Net
  * breakdown (right, sticky) + the S9-FE-02 approval-chain bar beneath it.
  *
- * **Data-loading honesty.** The milestone list and the "reload one certificate" action both call
- * endpoints that do not exist on the real backend yet (`api.ts`'s remarks, security review
- * sprint-09.md L-04) — this page still renders a complete, real loading/empty/error UI against
- * them (same discipline as `features/info/ProjectInfoPage.tsx`'s `getProject`), so it lights up the
- * moment those endpoints ship, rather than hiding the gap behind fabricated data. Every mutation
- * (submit/approve/return-for-revision/reject/record-payment) is a real, live S9-BE-05 endpoint and
- * needs no such caveat.
+ * The milestone list, the single-certificate reload, and now certificate creation are all real, live
+ * backend endpoints (the S9 read-side L-04 gap and the S9-BE-05 create gap are both closed). The
+ * "สร้างใบรับรอง" action opens {@link CreateCertificateModal}; the server computes every money field
+ * and the created certificate is upserted + selected via `applyUpdatedCertificate` (no list refetch).
  */
 export function PaymentPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const currentUserId = useAuthStore((state) => state.claims?.userId ?? null)
   const currentUserRole = useAuthStore((state) => state.claims?.role ?? null)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
 
   const certificates = usePaymentCertificates(projectId ?? '')
   const history = useApprovalActions(certificates.selected?.id ?? null)
@@ -45,10 +45,20 @@ export function PaymentPage() {
   if (!projectId) return null
 
   const canSubmit = currentUserRole !== null && SUBMIT_ROLES.includes(currentUserRole)
+  // Create shares CertificateCrudRoles with submit server-side (ProjectPaymentCertificatesController).
+  const canCreate = canSubmit
 
   return (
     <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[1.5fr_1fr]">
       <div className="flex flex-col gap-4">
+        {canCreate && (
+          <div className="flex justify-end">
+            <Button size="sm" onClick={() => setIsCreateOpen(true)}>
+              + สร้างใบรับรองผลงาน
+            </Button>
+          </div>
+        )}
+
         <MilestoneCertificateTable
           certificates={certificates.certificates}
           selectedId={certificates.selectedId}
@@ -88,6 +98,13 @@ export function PaymentPage() {
         onSubmit={() => void actions.submit()}
         submitting={actions.busyAction === 'submit'}
         canSubmit={canSubmit}
+      />
+
+      <CreateCertificateModal
+        projectId={projectId}
+        isOpen={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        onCreated={certificates.applyUpdatedCertificate}
       />
 
       <ProjectSettingsModal

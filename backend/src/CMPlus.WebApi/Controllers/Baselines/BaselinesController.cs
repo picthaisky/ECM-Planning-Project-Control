@@ -1,6 +1,7 @@
 using CMPlus.Application.Features.Baseline.Commands.ActivateBaseline;
 using CMPlus.Application.Features.Baseline.Commands.CaptureBaseline;
 using CMPlus.Application.Features.Baseline.Queries.CompareBaseline;
+using CMPlus.Application.Features.Baseline.Queries.ListBaselines;
 using CMPlus.Domain.Enums;
 using CMPlus.WebApi.ErrorHandling;
 using MediatR;
@@ -34,6 +35,24 @@ namespace CMPlus.WebApi.Controllers.Baselines;
 [Route("api/v1/projects/{projectId:guid}/baselines")]
 public sealed class BaselinesController(ISender sender) : ControllerBase
 {
+    /// <summary>The project's captured baselines, newest first (US-14.1). Gated to the same
+    /// money-audience as <see cref="Compare"/>, not the wider capture audience, for the same reason:
+    /// each <c>BaselineDto</c> carries the baseline's <c>Bac</c> (a commercially-sensitive figure).
+    /// This inherits <see cref="Compare"/>'s documented Planning caveat verbatim - Planning can
+    /// capture/activate a baseline but, because the list exposes BAC, cannot read it here; whether the
+    /// list's summary fields warrant a wider audience is the same open question flagged there, for
+    /// <c>po-analyst</c>/<c>domain-expert</c>, not settled here.</summary>
+    [HttpGet]
+    [Authorize(Roles = $"{nameof(UserRole.PM)},{nameof(UserRole.QS)},{nameof(UserRole.ProjectDirector)},{nameof(UserRole.Executive)},{nameof(UserRole.Admin)}")]
+    public async Task<IActionResult> List(Guid projectId, CancellationToken cancellationToken)
+    {
+        var result = await sender.Send(new ListBaselinesQuery(projectId), cancellationToken);
+
+        return result.IsSuccess
+            ? Ok(result.Value)
+            : ResultProblemMapper.ToActionResult(result.Error, HttpContext.Request.Path);
+    }
+
     [HttpPost]
     [Authorize(Roles = $"{nameof(UserRole.PM)},{nameof(UserRole.Planning)},{nameof(UserRole.Admin)}")]
     public async Task<IActionResult> Capture(

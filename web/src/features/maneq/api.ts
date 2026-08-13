@@ -2,11 +2,34 @@ import { AxiosError } from 'axios'
 import { apiClient } from '../../services/apiClient'
 import type { ProblemDetails } from '../auth/types'
 import type {
+  ActivityOptionDto,
   ManpowerLogDto,
   ProductivityIndexResponseDto,
   RecordManpowerLogCorrectionPayload,
   RecordManpowerLogPayload,
+  WbsNodeOptionDto,
+  WeatherLogOptionDto,
+  WorkCategoryDto,
 } from './types'
+
+/** Minimal view of the weather-log list response this feature parses (it carries more fields). */
+interface RawWeatherLog {
+  id: string
+  logDate: string
+  condition: string
+}
+
+/** Minimal view of the WBS-tree response this feature parses into a flat node list - deliberately
+ * NOT importing the wbs feature's own types, to keep the modules decoupled. */
+interface RawWbsTreeNode {
+  id: string
+  code: string
+  title: string
+  children: RawWbsTreeNode[]
+}
+interface RawWbsTree {
+  rootNodes: RawWbsTreeNode[]
+}
 
 /** Mirrors `features/weather/api.ts#WeatherApiError`'s established shape/discipline exactly. */
 export class ManpowerApiError extends Error {
@@ -129,6 +152,62 @@ export interface GetProductivityIndexParams {
  * of raw log rows and no work-category catalogue endpoint — confirmed directly against
  * `ProjectManpowerLogsController.cs`, not assumed; see `ManeqPage.tsx`'s own remarks on the resulting
  * screen-scope consequences). */
+/** `GET /api/v1/projects/{projectId}/wbs-tree` — the live WBS tree (S4-BE-01), flattened here into a
+ * flat node list for the record/correction form's (optional) WBS-node dropdown. Depth-first order, so
+ * parents precede their children. */
+export async function listWbsNodes(projectId: string): Promise<WbsNodeOptionDto[]> {
+  try {
+    const response = await apiClient.get<RawWbsTree>(`/projects/${projectId}/wbs-tree`)
+    const flat: WbsNodeOptionDto[] = []
+    const walk = (nodes: RawWbsTreeNode[]) => {
+      for (const node of nodes) {
+        flat.push({ id: node.id, code: node.code, title: node.title })
+        walk(node.children ?? [])
+      }
+    }
+    walk(response.data.rootNodes ?? [])
+    return flat
+  } catch (error) {
+    throw toManpowerApiError(error)
+  }
+}
+
+/** `GET /api/v1/projects/{projectId}/weather-logs` (S11-BE-01) — the project's weather logs, for the
+ * form's (optional) related-weather-log dropdown. Newest first (the endpoint's own order). */
+export async function listWeatherLogs(projectId: string): Promise<WeatherLogOptionDto[]> {
+  try {
+    const response = await apiClient.get<RawWeatherLog[]>(`/projects/${projectId}/weather-logs`)
+    return response.data.map((log) => ({ id: log.id, logDate: log.logDate, condition: log.condition }))
+  } catch (error) {
+    throw toManpowerApiError(error)
+  }
+}
+
+/** `GET /api/v1/projects/{projectId}/wbs-nodes/{wbsNodeId}/activities` (S4-BE-05) — the activities
+ * under one WBS node, for the form's dependent activity dropdown (populated from the selected node). */
+export async function listNodeActivities(projectId: string, wbsNodeId: string): Promise<ActivityOptionDto[]> {
+  try {
+    const response = await apiClient.get<ActivityOptionDto[]>(
+      `/projects/${projectId}/wbs-nodes/${wbsNodeId}/activities`,
+    )
+    return response.data
+  } catch (error) {
+    throw toManpowerApiError(error)
+  }
+}
+
+/** `GET /api/v1/projects/{projectId}/work-categories` (S12 catalogue gap closure) — real, live
+ * endpoint. Returns the project's active work-category catalogue (tenant-wide defaults + any
+ * project-specific entries), ordered by display order. Backs the record/correction form's dropdown. */
+export async function listWorkCategories(projectId: string): Promise<WorkCategoryDto[]> {
+  try {
+    const response = await apiClient.get<WorkCategoryDto[]>(`/projects/${projectId}/work-categories`)
+    return response.data
+  } catch (error) {
+    throw toManpowerApiError(error)
+  }
+}
+
 export async function getProductivityIndex(
   projectId: string,
   params: GetProductivityIndexParams,

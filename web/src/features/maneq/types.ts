@@ -144,3 +144,39 @@ export interface ProductivityIndexResponseDto {
   actualWorkerCount: number | null
   plannedWorkerCount: number | null
 }
+
+/** `WorkCategoryDto` — one work-category catalogue entry (`GET /projects/{id}/work-categories`), for
+ * the record/correction form's category dropdown. Thai-first name with the English term alongside. */
+export interface WorkCategoryDto {
+  id: string
+  code: string
+  nameTh: string
+  nameEn: string
+  displayOrder: number
+}
+
+/** One WBS node flattened from the `GET /projects/{id}/wbs-tree` tree, for the record/correction
+ * form's (optional) WBS-node dropdown — a human-usable picker in place of a raw-GUID text input. */
+export interface WbsNodeOptionDto {
+  id: string
+  code: string
+  title: string
+}
+
+/** One activity under a WBS node (`GET /projects/{id}/wbs-nodes/{nodeId}/activities`), for the
+ * (optional) activity dropdown — a dependent picker populated from the currently-selected WBS node. */
+export interface ActivityOptionDto {
+  id: string
+  activityCode: string
+  name: string
+}
+
+/** One weather-log entry (`GET /projects/{id}/weather-logs`), for the (optional) related-weather-log
+ * dropdown — links a manpower log to the weather day that affected the crew. */
+export interface WeatherLogOptionDto {
+  id: string
+  /** ISO date string (`logDate`); shown as its date part. */
+  logDate: string
+  /** `WeatherCondition` enum name (e.g. "HeavyRain"), shown alongside the date. */
+  condition: string
+}

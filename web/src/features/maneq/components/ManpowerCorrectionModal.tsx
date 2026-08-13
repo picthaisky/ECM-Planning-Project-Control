@@ -2,11 +2,13 @@ import { useId, useState } from 'react'
 import { Button, Modal } from '../../../components'
 import { buildRecordManpowerLogCorrectionPayload, manpowerLogFormValuesFromEntry, validateManpowerLogFormValues } from '../maneqForm'
 import { formatManpowerDate } from '../maneqLabels'
+import { useNodeActivities } from '../useNodeActivities'
 import { ManpowerLogFormFields } from './ManpowerLogFormFields'
-import type { ManpowerLogDto, ManpowerLogEntryKind, RecordManpowerLogCorrectionPayload } from '../types'
+import type { ManpowerLogDto, ManpowerLogEntryKind, RecordManpowerLogCorrectionPayload, WbsNodeOptionDto, WeatherLogOptionDto, WorkCategoryDto } from '../types'
 
 export interface ManpowerCorrectionModalProps {
   isOpen: boolean
+  projectId: string
   /** The row being corrected — always the current chain tail returned by the most recent write
    * (this session's own local table, since there is no `GET` list endpoint to re-derive a chain from
    * — see `ManeqPage.tsx`'s remarks). */
@@ -15,6 +17,9 @@ export interface ManpowerCorrectionModalProps {
   onSubmit: (logId: string, payload: RecordManpowerLogCorrectionPayload) => void
   busy: boolean
   errorMessage: string | null
+  workCategories?: WorkCategoryDto[]
+  wbsNodes?: WbsNodeOptionDto[]
+  weatherLogs?: WeatherLogOptionDto[]
 }
 
 const ENTRY_KIND_OPTIONS: Array<{ value: Extract<ManpowerLogEntryKind, 'Correction' | 'Retraction'>; label: string; hint: string }> = [
@@ -36,10 +41,11 @@ const ENTRY_KIND_OPTIONS: Array<{ value: Extract<ManpowerLogEntryKind, 'Correcti
  * `target`'s current values (`manpowerLogFormValuesFromEntry`). Choosing `Retraction` disables the
  * data fields, mirroring `WeatherCorrectionModal`'s identical reasoning.
  */
-export function ManpowerCorrectionModal({ isOpen, target, onClose, onSubmit, busy, errorMessage }: ManpowerCorrectionModalProps) {
+export function ManpowerCorrectionModal({ isOpen, projectId, target, onClose, onSubmit, busy, errorMessage, workCategories, wbsNodes, weatherLogs }: ManpowerCorrectionModalProps) {
   const [entryKind, setEntryKind] = useState<Extract<ManpowerLogEntryKind, 'Correction' | 'Retraction'>>('Correction')
   const [reason, setReason] = useState('')
   const [values, setValues] = useState(() => manpowerLogFormValuesFromEntry(target))
+  const activities = useNodeActivities(projectId, values.wbsNodeId)
   const [validationError, setValidationError] = useState<string | null>(null)
   const reasonId = useId()
 
@@ -138,7 +144,7 @@ export function ManpowerCorrectionModal({ isOpen, target, onClose, onSubmit, bus
         </p>
       )}
       <div className="mt-2">
-        <ManpowerLogFormFields values={values} onChange={(patch) => setValues((prev) => ({ ...prev, ...patch }))} disabled={isRetraction} />
+        <ManpowerLogFormFields values={values} onChange={(patch) => setValues((prev) => ({ ...prev, ...patch }))} disabled={isRetraction} workCategories={workCategories} wbsNodes={wbsNodes} activities={activities} weatherLogs={weatherLogs} />
       </div>
 
       {validationError && (

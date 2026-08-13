@@ -49,6 +49,8 @@ const sampleDashboard: DashboardResponseDto = {
     mixedScopeWbsNodeIds: [],
   },
   warnings: [],
+  cumulativeDisbursement: '0.00',
+  cumulativeWeatherStoppageDays: 0,
 }
 
 describe('features/dashboard/api', () => {

@@ -6,12 +6,11 @@ export type ApprovalActionsState = 'loading' | 'ready' | 'unavailable'
 
 /**
  * Loads the approval-action history for `ApprovalChainBar`/`voteProgress.ts` — the VO analogue of
- * `features/payment/useApprovalActions.ts`. `getVoApprovalActions` calls a real, live-*routed*
- * endpoint whose query handler nonetheless 404s unconditionally today (a genuine backend gap, not
- * the "not implemented at all" gap Payment has — see `api.ts#getVoApprovalActions`'s remarks), so a
- * 404 here is treated as `'unavailable'`, not an `'error'`: this component has exactly one honest
- * "history not available" state, never a scary red banner for a known, tracked gap — but the reason
- * is kept so a future fix can tell a genuine failure apart if needed.
+ * `features/payment/useApprovalActions.ts`. `getVoApprovalActions` calls a real, live endpoint
+ * (`api.ts#getVoApprovalActions`) that returns the VO's history on 200 and a bare 404 only for an
+ * unknown/cross-tenant id. Any failure here is treated as `'unavailable'`, not an `'error'`: this
+ * component has exactly one honest "history not available" state, never a scary red banner — the
+ * reason is kept so a future change can tell a genuine failure apart if needed.
  */
 export function useVoApprovalActions(variationOrderId: string | null) {
   const [actions, setActions] = useState<ApprovalActionDto[] | null>(null)

@@ -1,5 +1,6 @@
 using CMPlus.Application.Abstractions;
 using CMPlus.Application.Features.Evm;
+using CMPlus.Application.Services.Eot;
 using CMPlus.Application.Services.Wbs;
 using CMPlus.Domain.Common;
 using MediatR;
@@ -33,7 +34,9 @@ namespace CMPlus.Application.Features.Dashboard.Queries.GetDashboard;
 public sealed class GetDashboardQueryHandler(
     EvmComputationService evmComputationService,
     IWbsTreeReader wbsTreeReader,
-    IWbsProgressReader wbsProgressReader)
+    IWbsProgressReader wbsProgressReader,
+    IProjectFinanceLedgerReader financeLedgerReader,
+    IDailyWeatherLogRepository weatherLogRepository)
     : IRequestHandler<GetDashboardQuery, Result<DashboardResponseDto>>
 {
     public async Task<Result<DashboardResponseDto>> Handle(GetDashboardQuery request, CancellationToken cancellationToken)
@@ -53,7 +56,22 @@ public sealed class GetDashboardQueryHandler(
             nodeRows.Select(n => new WbsRollupNodeInput(n.Id, n.ParentWbsNodeId, n.WeightPercentage)).ToList(),
             activityRows);
 
-        var response = DashboardResponseDto.From(request.ProjectId, computation, selectedVariantResult, rollup);
+        var cumulativeDisbursement = await financeLedgerReader.GetTotalDisbursedAsync(request.ProjectId, cancellationToken);
+
+        // Weather-stoppage-days KPI: count distinct calendar dates with a work stoppage over the
+        // correction-RESOLVED in-force log set (EotEffectiveLogSet, the exact same resolution the EOT
+        // evaluator uses - never the raw rows, so a corrected/retracted stoppage does not double-count
+        // or linger). "Stoppage" = Impact != NoImpact (DailyWeatherLog.WorkStoppage), the human-decided
+        // definition for this KPI.
+        var allWeatherLogs = await weatherLogRepository.ListByProjectAsync(request.ProjectId, from: null, to: null, cancellationToken);
+        var weatherStoppageDays = EotEffectiveLogSet.Resolve(allWeatherLogs)
+            .Where(log => log.WorkStoppage)
+            .Select(log => log.LogDate.Date)
+            .Distinct()
+            .Count();
+
+        var response = DashboardResponseDto.From(
+            request.ProjectId, computation, selectedVariantResult, rollup, cumulativeDisbursement, weatherStoppageDays);
         return Result<DashboardResponseDto>.Success(response);
     }
 }

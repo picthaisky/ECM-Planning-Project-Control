@@ -19,8 +19,17 @@ internal sealed class FakePaymentCertificateRepository : IPaymentCertificateRepo
 
     public void Seed(PaymentCertificate certificate) => _certificates[certificate.Id] = certificate;
 
+    public PaymentCertificate? AddedCertificate { get; private set; }
+
     public Task<PaymentCertificate?> FindAsync(Guid paymentCertificateId, CancellationToken cancellationToken = default) =>
         Task.FromResult(_certificates.GetValueOrDefault(paymentCertificateId));
+
+    public Task AddAsync(PaymentCertificate certificate, CancellationToken cancellationToken = default)
+    {
+        AddedCertificate = certificate;
+        _certificates[certificate.Id] = certificate;
+        return Task.CompletedTask;
+    }
 
     public void AddLedgerEntries(IReadOnlyList<ProjectFinanceLedger> entries) => AddedLedgerEntries.AddRange(entries);
 

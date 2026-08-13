@@ -9,10 +9,13 @@ using CMPlus.WebApi.ErrorHandling;
 using CMPlus.WebApi.HealthChecks;
 using CMPlus.WebApi.Json;
 using CMPlus.WebApi.Middleware;
+using CMPlus.WebApi.Networking;
 using CMPlus.WebApi.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.IdentityModel.Tokens;
@@ -179,7 +182,18 @@ builder.Services.AddAuthorization(options =>
 // login route only - see LoginRateLimiterSetup for the numbers and the chained-limiter rationale.
 builder.Services.AddLoginRateLimiting();
 
+// sprint-16.md F-1: trust X-Forwarded-For/Proto only from the configured proxy network, so the per-IP
+// login limiter above sees the real client IP behind the staging/prod reverse proxy — never trust-all
+// (that would let clients spoof the header and defeat the limiter). Blank config trusts nothing.
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+    ForwardedHeadersSetup.Configure(options, builder.Configuration["ForwardedHeaders:KnownNetwork"]));
+
 var app = builder.Build();
+
+// sprint-16.md F-1: apply forwarded headers FIRST, so the corrected client IP and scheme are in
+// place before HTTPS redirection and the per-IP rate limiter read them. Trusts only the configured
+// proxy network (see ForwardedHeadersSetup); a no-op when unconfigured.
+app.UseForwardedHeaders();
 
 // sprint-10.md L-06 / sprint-16.md S16-SEC-01: baseline security headers on EVERY response.
 // Outermost so its OnStarting callback is attached before any downstream path (including

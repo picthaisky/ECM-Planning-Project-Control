@@ -72,12 +72,10 @@ interface KpiTileViewModel {
  * SPI, CPI, EAC, cumulative disbursement, cumulative rain days). Every tile is a real `Link` to the
  * screen it drills into, matching the prototype's `onClick` affordance on every tile.
  *
- * Only 4 of the 6 are backed by real data this sprint: **cumulative disbursement** (needs
- * `PaymentCertificate`/`ProjectFinanceLedger`, Sprint 9) and **cumulative rain days** (needs the
- * Weather Log module, unbuilt — no backend `Weather*` feature exists anywhere in this codebase) have
- * no data source at all. Rendered as explicit "not available yet" tiles (real "—", a reason caption,
- * still a working link to that screen's placeholder) rather than fabricated numbers — see this
- * sprint's frontend report.
+ * All 6 are now backed by real dashboard data. **Cumulative disbursement** is the SUM of Disbursement
+ * ledger entries; **cumulative rain days** is the count of distinct dates with a weather work-stoppage
+ * (Impact != NoImpact) over the correction-resolved in-force weather-log set — both aggregated by the
+ * `GetDashboardQuery` handler (`CumulativeDisbursement`/`CumulativeWeatherStoppageDays`).
  */
 export function DashboardKpiRow({ projectId, dashboard }: DashboardKpiRowProps) {
   const tiles: KpiTileViewModel[] = [
@@ -116,17 +114,17 @@ export function DashboardKpiRow({ projectId, dashboard }: DashboardKpiRowProps) 
     {
       key: 'disbursement',
       label: 'เบิกจ่ายสะสม',
-      value: undefined,
+      value: formatMoneyMillions(dashboard.cumulativeDisbursement),
       tone: 'neutral',
-      caption: 'ยังไม่พร้อมใช้งาน — รอ Payment Certificate (Sprint 9)',
+      caption: 'ยอดจ่ายจริงสะสม (MB)',
       to: `/app/${projectId}/payment`,
     },
     {
       key: 'rain-days',
       label: 'วันฝนตกสะสม',
-      value: undefined,
+      value: `${dashboard.cumulativeWeatherStoppageDays} วัน`,
       tone: 'neutral',
-      caption: 'ยังไม่พร้อมใช้งาน — Weather Log ยังไม่เปิดใช้งาน',
+      caption: 'วันที่สภาพอากาศทำให้หยุดงาน',
       to: `/app/${projectId}/weather`,
     },
   ]

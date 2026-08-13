@@ -39,4 +39,19 @@ public sealed class ProjectFinanceLedgerReader(CmPlusDbContext dbContext) : IPro
 
         return amounts.Sum();
     }
+
+    public async Task<decimal> GetTotalDisbursedAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        // Cumulative disbursement = SUM(Amount) of every Disbursement entry (posted when a certified
+        // certificate's payment is recorded, RecordPayment) - the total actually paid out, the
+        // Executive Dashboard's "จ่ายสะสม" KPI. Same project-and-Sum client-side shape as the other
+        // two ledger reads above.
+        var amounts = await dbContext.ProjectFinanceLedgers
+            .AsNoTracking()
+            .Where(e => e.ProjectId == projectId && e.EntryType == FinanceLedgerEntryType.Disbursement)
+            .Select(e => e.Amount)
+            .ToListAsync(cancellationToken);
+
+        return amounts.Sum();
+    }
 }

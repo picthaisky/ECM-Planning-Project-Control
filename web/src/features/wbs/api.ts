@@ -138,20 +138,16 @@ export async function getWbsTree(projectId: string): Promise<WbsTreeDto> {
  * this node contain, and what is each one's current %" read the batch-progress grid needs to
  * populate its rows from a WBS node the user actually browsed to.
  *
- * This endpoint does **not exist on the real backend yet**. `GetWbsTreeQuery` (S4-BE-01)
- * deliberately returns only a per-node `ActivityCount` rollup — "lazy/paginated child-loading" is
- * named directly in that query's own DoD text, but the paginated child endpoint itself was not
- * shipped this sprint, and no other endpoint enumerates `Activity` rows at all (confirmed: no
- * `ActivitiesController`/`IActivityReader` exists anywhere in `backend/src`). Calling this against
- * the live API returns a 404 today.
+ * **This is a real, live endpoint** (`WbsNodesController` `[HttpGet("activities")]` →
+ * `GetNodeActivitiesQuery` / `IWbsNodeActivitiesReader`, S4-BE-05 — the fast-follow this comment
+ * originally flagged; it landed under `WbsNodesController`/`IWbsNodeActivitiesReader`, not the
+ * `ActivitiesController`/`IActivityReader` names this remark had searched for, which is why an
+ * earlier grep missed it). Returns the node's activities, or 404 for an unknown node.
  *
- * `ProgressUpdatePanel` still handles that failure with a real, honest empty/error state (never a
- * silent hang) and offers a manual "+ เพิ่มกิจกรรมด้วยรหัส (Activity ID)" add-row path
- * (`ManualActivityRow`) so the batch-submit mechanism itself — validation, decrease-confirmation,
- * the real `POST .../progress/batch` call — is fully usable and end-to-end-verifiable today even
- * before this read endpoint ships. Flagged to `backend-developer`/`system-architect` as
- * fast-follow work (a `GetNodeActivitiesQuery` alongside `GetWbsTreeQuery`); see this sprint's
- * frontend report.
+ * `ProgressUpdatePanel` still handles a failure with a real, honest empty/error state (never a
+ * silent hang) and also offers the manual "+ เพิ่มกิจกรรมด้วยรหัส (Activity ID)" add-row path
+ * (`ManualActivityRow`), so the batch-submit mechanism — validation, decrease-confirmation, the real
+ * `POST .../progress/batch` call — is usable even when this read fails.
  */
 export async function getNodeActivities(
   projectId: string,
